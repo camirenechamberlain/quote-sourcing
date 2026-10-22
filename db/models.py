@@ -47,6 +47,7 @@ class Job(Base):
     status: Mapped[str] = mapped_column(String, default="DRAFT")
     created_at: Mapped[datetime.datetime] = mapped_column(DateTime, default=_now)
     attachment_paths: Mapped[list] = mapped_column(JSON, default=list)
+    user_id: Mapped[str | None] = mapped_column(ForeignKey("users.id"), nullable=True)
 
     companies: Mapped[list["Company"]] = relationship(back_populates="job", cascade="all, delete-orphan")
 
@@ -141,3 +142,47 @@ class AppSetting(Base):
 
     key: Mapped[str] = mapped_column(String, primary_key=True)
     value: Mapped[str] = mapped_column(String, nullable=False)
+
+
+class User(Base):
+    """A person using the WhatsApp bot. Identified by their WhatsApp number (no login)."""
+
+    __tablename__ = "users"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
+    whatsapp_number: Mapped[str] = mapped_column(String, unique=True, nullable=False)  # "whatsapp:+614..."
+    name: Mapped[str | None] = mapped_column(String, nullable=True)
+    email: Mapped[str | None] = mapped_column(String, nullable=True)
+    sheet_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    created_at: Mapped[datetime.datetime] = mapped_column(DateTime, default=_now)
+
+
+class WaMessage(Base):
+    """Every WhatsApp message in or out. `twilio_sid` is unique so webhook retries can't double-process."""
+
+    __tablename__ = "wa_messages"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), nullable=False)
+    direction: Mapped[str] = mapped_column(String, nullable=False)  # in | out
+    body: Mapped[str] = mapped_column(Text, default="")
+    media_paths: Mapped[list] = mapped_column(JSON, default=list)
+    twilio_sid: Mapped[str | None] = mapped_column(String, unique=True, nullable=True)
+    delivery: Mapped[str | None] = mapped_column(String, nullable=True)  # sent | dry_run | failed (out only)
+    created_at: Mapped[datetime.datetime] = mapped_column(DateTime, default=_now)
+
+
+class IntakeSession(Base):
+    """One in-progress job request being collected over WhatsApp."""
+
+    __tablename__ = "intake_sessions"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), nullable=False)
+    state: Mapped[str] = mapped_column(String, default="collecting")  # collecting|awaiting_confirm|confirmed|cancelled
+    draft: Mapped[dict] = mapped_column(JSON, default=dict)
+    photo_paths: Mapped[list] = mapped_column(JSON, default=list)
+    questions_asked: Mapped[int] = mapped_column(Integer, default=0)
+    job_id: Mapped[str | None] = mapped_column(ForeignKey("jobs.id"), nullable=True)
+    created_at: Mapped[datetime.datetime] = mapped_column(DateTime, default=_now)
+    updated_at: Mapped[datetime.datetime] = mapped_column(DateTime, default=_now, onupdate=_now)

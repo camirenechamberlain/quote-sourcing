@@ -1,0 +1,36 @@
+"""Central configuration. Importing this module loads `.env` once for the whole app."""
+from __future__ import annotations
+
+import os
+from pathlib import Path
+
+from dotenv import load_dotenv
+
+ROOT_DIR = Path(__file__).resolve().parent
+load_dotenv(ROOT_DIR / ".env")
+
+
+def env(name: str, default: str | None = None) -> str | None:
+    value = os.environ.get(name)
+    return value if value not in (None, "") else default
+
+
+def env_list(name: str) -> list[str]:
+    raw = env(name, "") or ""
+    return [item.strip() for item in raw.split(",") if item.strip()]
+
+
+# --- Models -----------------------------------------------------------------
+INTAKE_MODEL = env("INTAKE_MODEL", "claude-sonnet-5-5")
+
+# --- WhatsApp / Twilio ------------------------------------------------------
+TWILIO_ACCOUNT_SID = env("TWILIO_ACCOUNT_SID")
+TWILIO_AUTH_TOKEN = env("TWILIO_AUTH_TOKEN")
+TWILIO_WHATSAPP_FROM = env("TWILIO_WHATSAPP_FROM")  # e.g. whatsapp:+14155238886 (sandbox)
+PUBLIC_BASE_URL = (env("PUBLIC_BASE_URL", "") or "").rstrip("/")  # public https URL Twilio calls
+# Comma-separated whatsapp numbers allowed to use the bot (beta gate). Empty = anyone.
+ALLOWED_NUMBERS = env_list("ALLOWED_NUMBERS")
+
+# --- Safety -----------------------------------------------------------------
+# dry_run: nothing is sent to anyone (messages are only recorded). live: real sends.
+OUTBOUND_MODE = env("OUTBOUND_MODE", "dry_run")
