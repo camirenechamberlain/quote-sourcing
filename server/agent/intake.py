@@ -465,5 +465,11 @@ def handle_message(
         session.state = "collecting"
         return [question]
 
+    if config.PHOTOS_FIRST:
+        # The request is described: look at the photos (or ask for them) NOW, instead of after the customer confirms.
+        # Once the review has run it never repeats, so later edits go straight back to the summary.
+        first = run_supplier_review(session, review_fn, render_options)
+        if first:
+            return first
     session.state = "awaiting_confirm"
     return [_summary(session.draft, session.photo_paths)]

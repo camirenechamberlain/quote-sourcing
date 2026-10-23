@@ -94,12 +94,13 @@ The same step also works out, asking only for what the customer hasn't already s
   engineering/design drawings, then the title and any survey or permit). Anything already attached is not suggested again.
 
 **Photos first.** The first intake step only needs the trade, the job and the location (no size or scope questions). When the
-customer taps "Yes, request quotes", they are asked to attach photos *before* any question. The reviewer then studies up to
+job is described, the review starts straight away (no confirm tap first): photos sent with the job are read immediately, and
+otherwise the customer is asked to attach photos *before* any question. The reviewer studies up to
 `MAX_REVIEW_PHOTOS` (4) downscaled photos like a tradesperson on a site visit: whatever it can plainly see (existing material,
 condition, rough size where a car or door gives scale) is recorded in the brief as "seen in photos, to be confirmed on site" and
 shown to the customer, and it asks only about what the photos can't show. If the photos answer everything it asks nothing.
 "Continue without photos" falls back to the normal questions. Cost: roughly 1,000 tokens per photo on the review call (about 1
-cent for four). Turn off with `PHOTOS_FIRST=0`. Checked live on a synthetic driveway scene: 5 questions without a photo, 0 with.
+cent for four). `PHOTOS_FIRST=0` restores the older order (summary and confirm first, questions after). Checked live on a synthetic driveway scene: 5 questions without a photo, 0 with.
 
 Questions are asked **one at a time** ("2 of 4: ..."). On the website each is a row of tappable options (multi-select where
 several can apply, with a Done button); the customer can always type instead, tap "Not sure", or "Send as is" to skip the rest.
