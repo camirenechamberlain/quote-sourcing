@@ -63,7 +63,7 @@ def test_complete_request_asks_for_name_then_confirms_then_creates_job(db, user,
     replies = handle_message(db, user, "Irene", model_fn=scripted())
     assert user.name == "Irene"
     assert "Reply YES to start" in replies[0]
-    assert "Photos: 1" in replies[0]
+    assert "Attachments: 1 photo" in replies[0]
     assert "up to $300" in replies[0]
     record_out(db, user, replies)
 
@@ -125,7 +125,7 @@ def test_photo_only_message_is_passed_to_the_model_with_photo_count(db, user, tm
         return IntakeUpdate(is_job_request=False, next_question="Thanks for the photo! What needs doing?")
 
     replies = handle_message(db, user, "", [str(photo)], model_fn=fake)
-    assert seen == {"user_text": "(sent photo only)", "n_photos": 1}
+    assert seen == {"user_text": "(sent an attachment only)", "n_photos": 1}
     assert replies == ["Thanks for the photo! What needs doing?"]
 
 

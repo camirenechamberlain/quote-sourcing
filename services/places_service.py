@@ -41,6 +41,14 @@ def geocode(location_text: str) -> tuple[float, float]:
     return loc["lat"], loc["lng"]
 
 
+def build_query(category: str, project_type: str | None = None) -> str:
+    """The Places text query. Residential vs commercial is a key supplier distinction, so it leads the query
+    ("commercial electrician" finds different businesses to "residential electrician")."""
+    if project_type in ("residential", "commercial"):
+        return f"{project_type} {category}"
+    return category
+
+
 def search_companies(category: str, lat: float, lng: float, radius_m: int) -> list[dict]:
     headers = {
         "Content-Type": "application/json",

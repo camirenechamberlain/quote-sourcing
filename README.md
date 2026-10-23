@@ -74,19 +74,36 @@ Putting it on quoteschmote.com from your own PC: use a Cloudflare Tunnel pointin
 
 ### Supplier review and sourcing preferences
 
-When a customer taps "Yes, request quotes", a second agent (`server/agent/supplier_review.py`) reads the request the way a
-tradesperson would and asks only about **obvious gaps that would block a ballpark quote** (house size, wall type, etc.).
-At the same time it works out three sourcing preferences, asking only for ones the customer hasn't already stated:
+When a customer taps "Yes, request quotes", a second agent (`server/agent/supplier_review.py`) acts as a **senior professional in
+the relevant field** (a land surveyor for a subdivision, an electrician for a rewire, and so on) and asks the pertinent questions
+that trade always asks before it can quote completely: scope, size, existing condition, access and hazards, compliance and
+permits, who supplies materials, occupancy, urgency. Up to **five** questions, most important first; fewer when the request is
+already complete, and a single tile gets two. Each question carries an importance (essential / important / minor) and minor ones
+are dropped unless `REVIEW_THOROUGH=1`.
 
-- **Proximity**: skipped for work that can be done remotely. Otherwise "within N km" sets the search radius (default 15 km,
-  "anywhere" = 50 km, the Places search cap).
-- **Reviews**: "4.5 stars or higher" sets `Job.min_rating`; the Discover Companies page then excludes lower-rated and unrated
-  suppliers before scraping them (`services/filters.py`).
+The same step also works out, asking only for what the customer hasn't already said:
+
+- **Residential or commercial**, where it matters for the trade. It leads the Places search query ("commercial electrician")
+  and appears in the supplier email.
+- **Proximity**: skipped for work that can be done remotely. "within N km" sets the radius (default 15 km, "anywhere" = 50 km,
+  the Places cap).
+- **Reviews**: "4.5 stars or higher" sets `Job.min_rating`; Discover Companies excludes lower-rated and unrated suppliers before
+  scraping them (`services/filters.py`).
 - **Timeframe**: when the work needs doing; it appears in the supplier email.
+- **Suggested attachments**: which photos or documents would help suppliers quote (for subdivisions it always leads with
+  engineering/design drawings, then the title and any survey or permit). Anything already attached is not suggested again.
 
-It runs once per request, never loops, and fails open (a reviewer error never blocks a customer). Customers can reply
-"send as is" at any point to skip the questions; defaults then apply. Settings: `REVIEW_MODEL`, and `REVIEW_THOROUGH=1` to
-also ask the top nice-to-have details.
+The reply is one message in labelled sections with continuous numbering. It runs once per request, never loops, and fails open
+(a reviewer error never blocks a customer). Customers can reply "send as is" at any point to skip it; defaults then apply.
+Settings: `REVIEW_MODEL`, `REVIEW_THOROUGH`.
+
+### Photos and PDF attachments
+
+Customers can attach photos and PDFs (for example engineering drawings): up to 6 files per message, 12 per request, 4 PDFs,
+10 MB per PDF, 15 MB in total. File type is decided by content, never by name. Photos are re-encoded (GPS/EXIF stripped).
+PDFs are rebuilt page by page (`services/documents.py`), which drops JavaScript, embedded files, form scripts, annotation
+actions and document metadata while keeping the pages vector-sharp; encrypted, oversized or unreadable PDFs are rejected with a
+clear message. Suppliers receive readable file names (`photo-1.jpg`, `Proposed Lot Layout - Rev B.pdf`).
 
 ### Caching
 

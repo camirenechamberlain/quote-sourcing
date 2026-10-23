@@ -31,6 +31,8 @@ job_id = job_labels[selected_label]
 job = session.get(Job, job_id)
 
 prefs = [f"Category: **{job.category}**", f"Location: **{job.location_text}**", f"Radius: **{job.radius_m / 1000:.0f} km**"]
+if job.project_type:
+    prefs.append(f"Project: **{job.project_type}**")
 if job.min_rating:
     prefs.append(f"Customer wants **{job.min_rating:g}★+** suppliers only")
 if job.timeframe:
@@ -50,7 +52,7 @@ if col_a.button("Discover companies", type="primary"):
                 lat, lng = job.lat, job.lng
 
         with st.spinner("Searching Google Places..."):
-            found = places_service.search_companies(job.category, lat, lng, job.radius_m)
+            found = places_service.search_companies(places_service.build_query(job.category, job.project_type), lat, lng, job.radius_m)
 
         existing_place_ids = {c.place_id for c in session.query(Company).filter_by(job_id=job.id).all()}
         added = 0

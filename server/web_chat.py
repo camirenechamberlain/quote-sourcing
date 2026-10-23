@@ -22,14 +22,15 @@ from db.session import get_session
 from server import assets
 from server.agent import intake
 from services import attachments as attachments_service
-from services import images
+from services import documents, images
 
 log = logging.getLogger("web_chat")
 router = APIRouter()
 
 MAX_TEXT_CHARS = 2000
 MAX_FILES_PER_MESSAGE = 6
-MAX_PHOTOS_PER_REQUEST = 12
+MAX_ATTACHMENTS_PER_REQUEST = 12
+MAX_PDFS_PER_REQUEST = 4
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 # --- Small in-memory rate limiter (single process; fine for the MVP) ---------------------------------
@@ -275,9 +276,9 @@ def chat_message(
     if len(text) > MAX_TEXT_CHARS:
         return JSONResponse({"error": "too_long", "message": f"Please keep messages under {MAX_TEXT_CHARS} characters."}, status_code=400)
     if len(files) > MAX_FILES_PER_MESSAGE:
-        return JSONResponse({"error": "too_many_files", "message": f"You can attach up to {MAX_FILES_PER_MESSAGE} photos at a time."}, status_code=400)
+        return JSONResponse({"error": "too_many_files", "message": f"You can attach up to {MAX_FILES_PER_MESSAGE} files at a time."}, status_code=400)
     if not text and not files:
-        return JSONResponse({"error": "empty", "message": "Type a message or attach a photo."}, status_code=400)
+        return JSONResponse({"error": "empty", "message": "Type a message or attach a photo or PDF."}, status_code=400)
 
     db = get_session()
     try:
@@ -334,21 +335,39 @@ def chat_message(
             db.commit()
             return {"replies": [msg], **_state(db, user, request), "state": "limit_reached"}
 
-        already_photos = len(open_session.photo_paths or []) if open_session else 0
-        if already_photos + len(files) > MAX_PHOTOS_PER_REQUEST:
-            return JSONResponse({"error": "too_many_photos", "message": f"A request can include up to {MAX_PHOTOS_PER_REQUEST} photos."}, status_code=400)
+        existing = list(open_session.photo_paths or []) if open_session else []
+        if len(existing) + len(files) > MAX_ATTACHMENTS_PER_REQUEST:
+            return JSONResponse({"error": "too_many_attachments", "message": f"A request can include up to {MAX_ATTACHMENTS_PER_REQUEST} attachments."}, status_code=400)
+        pdfs_so_far = sum(1 for p in existing if p.lower().endswith(".pdf"))
 
         saved: list[str] = []
+
+        def discard_saved() -> None:
+            for p in saved:
+                Path(p).unlink(missing_ok=True)
+
         dest = attachments_service.ATTACHMENTS_DIR / "_incoming" / user.id
         for f in files:
-            raw = f.file.read(images.MAX_UPLOAD_BYTES + 1)
+            raw = f.file.read(documents.MAX_PDF_BYTES + 1)
             try:
-                path = images.save_sanitised(raw, dest, secrets.token_hex(6))
-            except images.BadImage as exc:
-                for p in saved:
-                    Path(p).unlink(missing_ok=True)
-                return JSONResponse({"error": "bad_image", "message": f"{f.filename or 'A file'}: {exc}"}, status_code=400)
+                if documents.is_pdf(raw):  # decided by content, never by the file name or claimed type
+                    pdfs_so_far += 1
+                    if pdfs_so_far > MAX_PDFS_PER_REQUEST:
+                        discard_saved()
+                        return JSONResponse({"error": "too_many_pdfs", "message": f"A request can include up to {MAX_PDFS_PER_REQUEST} PDFs."}, status_code=400)
+                    path = documents.save_sanitised_pdf(raw, dest, secrets.token_hex(4), f.filename)
+                else:
+                    path = images.save_sanitised(raw, dest, secrets.token_hex(6))
+            except (images.BadImage, documents.BadPdf) as exc:
+                discard_saved()
+                return JSONResponse({"error": "bad_upload", "message": f"{f.filename or 'A file'}: {exc}"}, status_code=400)
             saved.append(str(path))
+
+        # Everything is emailed to suppliers, so keep the total under the soft cap (Gmail's limit is ~25MB).
+        if attachments_service.total_size(existing + saved) > attachments_service.MAX_TOTAL_BYTES:
+            discard_saved()
+            limit_mb = attachments_service.MAX_TOTAL_BYTES // 1_000_000
+            return JSONResponse({"error": "too_large", "message": f"Attachments can total up to {limit_mb}MB. Try removing a file or sending a smaller PDF."}, status_code=400)
 
         chat.message_count += 1
         _log_message(db, user, "in", text, saved)

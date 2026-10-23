@@ -44,16 +44,18 @@ def job_for(db, user):
 
 
 # ---- what the reviewer returns ------------------------------------------------------------------------------
-def test_only_blocking_gaps_are_kept_and_capped_at_three():
+def test_essential_then_important_questions_are_kept_minor_dropped_and_capped_at_five():
+    def gap(q, importance): return {"question": q, "why": "x", "importance": importance}
     tool_input = {"gaps": [
-        {"question": "How many storeys?", "why": "x", "blocking": True},
-        {"question": "Favourite colour?", "why": "x", "blocking": False},
-        {"question": "  ", "why": "x", "blocking": True},
-        {"question": "Is paint supplied?", "why": "x", "blocking": True},
-        {"question": "Any access issues?", "why": "x", "blocking": True},
-        {"question": "Fourth blocking one", "why": "x", "blocking": True},
+        gap("Important A", "important"), gap("Minor A", "minor"), gap("  ", "essential"), gap("Essential A", "essential"),
+        gap("Important B", "important"), gap("Essential B", "essential"), gap("Important C", "important"),
+        gap("Important D", "important"), gap("Important E", "important"),
     ]}
-    assert supplier_review.blocking_questions(tool_input) == ["How many storeys?", "Is paint supplied?", "Any access issues?"]
+    # essential first, then important in the order given; minor and empty text dropped; at most five
+    assert supplier_review.pertinent_questions(tool_input) == [
+        "Essential A", "Essential B", "Important A", "Important B", "Important C",
+    ]
+    assert supplier_review.MAX_QUESTIONS == 5
 
 
 # ---- the review step in the conversation -------------------------------------------------------------------
@@ -100,7 +102,7 @@ def test_preferences_already_stated_are_not_asked_again(db, user):
     reply = handle_message(db, user, "yes", review_fn=reviewer, require_name=False)[0]
     assert "How many storeys" in reply
     assert "How close" not in reply and "4.5 stars" not in reply and "When does the job" not in reply
-    assert "one quick thing" in reply  # a single question gets the singular intro
+    assert "here's what a supplier would want to know" in reply
 
 
 def test_nothing_missing_goes_straight_to_creating_the_job(db, user):
@@ -203,12 +205,9 @@ def test_send_as_is_needs_a_complete_request(db, user):
     assert reply == ["What do you need done?"]
 
 
-def test_thorough_mode_adds_nice_to_haves_after_the_blocking_ones():
-    tool_input = {"gaps": [
-        {"question": "Nice one", "why": "x", "blocking": False},
-        {"question": "Blocking one", "why": "x", "blocking": True},
-        {"question": "Another nice one", "why": "x", "blocking": False},
-        {"question": "Third nice one", "why": "x", "blocking": False},
-    ]}
-    assert supplier_review.blocking_questions(tool_input) == ["Blocking one"]
-    assert supplier_review.blocking_questions(tool_input, include_nice_to_have=True) == ["Blocking one", "Nice one", "Another nice one"]
+def test_thorough_mode_adds_minor_questions_after_the_rest():
+    def gap(q, importance): return {"question": q, "why": "x", "importance": importance}
+    tool_input = {"gaps": [gap("Minor 1", "minor"), gap("Essential", "essential"), gap("Minor 2", "minor"), gap("Important", "important")]}
+    assert supplier_review.pertinent_questions(tool_input) == ["Essential", "Important"]
+    assert supplier_review.pertinent_questions(tool_input, include_minor=True) == ["Essential", "Important", "Minor 1", "Minor 2"]
+    assert supplier_review.pertinent_questions({"gaps": [{"question": "Odd", "why": "x", "importance": "surprising"}]}) == []  # unknown level = minor

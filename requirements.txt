@@ -17,3 +17,4 @@ psycopg[binary]>=3.2
 pytest>=8.0
 pillow>=10.4
 phonenumbers>=8.13
+pypdf>=5.0

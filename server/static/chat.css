@@ -170,3 +170,25 @@ input:focus, textarea:focus { outline: 2px solid var(--accent); outline-offset: 
 .chat.landing .previews, .chat.landing .chat-error { padding-left: 0; padding-right: 0; }
 .chat.landing .fine { margin-top: 14px; }
 .chat:not(.landing) .landing-only { display: none; }
+
+
+/* ---- PDF attachments ---- */
+.preview.pdf {
+  width: 92px; height: 64px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface);
+  display: flex; flex-direction: column; justify-content: center; gap: 4px; padding: 6px 8px;
+}
+.preview.pdf .pdf-icon { align-self: flex-start; background: var(--ink); color: #fff; font-size: 0.65rem; font-weight: 800; letter-spacing: 0.06em; padding: 2px 6px; border-radius: 4px; }
+.preview.pdf .pdf-name { font-size: 0.72rem; line-height: 1.15; color: var(--ink); overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow-wrap: anywhere; }
+.doc-chip { display: inline-block; max-width: 100%; padding: 6px 10px; border-radius: 8px; background: rgba(255, 255, 255, 0.16); font-size: 0.85rem; overflow-wrap: anywhere; }
+.bubble.bot .doc-chip { background: var(--accent-soft); }
+
+/* ---- Scrolling: the scroll area spans the full window width ----
+   The conversation column stays 720px wide, but it is centred with padding rather than by narrowing the scroll
+   container, so the mouse wheel / trackpad scrolls the chat wherever the cursor is over the window. */
+main { max-width: none; }
+.log { padding-left: max(16px, calc((100% - 720px) / 2)); padding-right: max(16px, calc((100% - 720px) / 2)); overscroll-behavior: contain; }
+.quick, .previews, .chat-error { padding-left: max(16px, calc((100% - 720px) / 2)); padding-right: max(16px, calc((100% - 720px) / 2)); }
+.composer { padding-left: max(12px, calc((100% - 720px) / 2 + 12px)); padding-right: max(12px, calc((100% - 720px) / 2 + 12px)); }
+.chat.landing { padding-left: max(16px, calc((100% - 720px) / 2)); padding-right: max(16px, calc((100% - 720px) / 2)); }
+.chat.landing .log, .chat.landing .composer, .chat.landing .quick, .chat.landing .previews, .chat.landing .chat-error { padding-left: 0; padding-right: 0; }
+.chat.landing .composer { padding: 12px; }

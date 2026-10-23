@@ -358,7 +358,7 @@ def test_photo_upload_strips_metadata_and_is_attached_to_the_job(client):
 def test_non_image_with_image_name_is_rejected(client):
     token = start(client).json()["token"]
     r = say(client, token, "hi", files=[("files", ("evil.jpg", b"<script>alert(1)</script>", "image/jpeg"))])
-    assert r.status_code == 400 and r.json()["error"] == "bad_image"
+    assert r.status_code == 400 and r.json()["error"] == "bad_upload"
 
 
 def test_too_many_files_and_oversize_rejected(client):
@@ -366,7 +366,7 @@ def test_too_many_files_and_oversize_rejected(client):
     many = [("files", (f"{i}.jpg", jpeg_bytes(), "image/jpeg")) for i in range(7)]
     assert say(client, token, "hi", files=many).json()["error"] == "too_many_files"
     big = b"\xff\xd8\xff" + b"0" * 8_100_000
-    assert say(client, token, "hi", files=[("files", ("big.jpg", big, "image/jpeg"))]).json()["error"] == "bad_image"
+    assert say(client, token, "hi", files=[("files", ("big.jpg", big, "image/jpeg"))]).json()["error"] == "bad_upload"
 
 
 def test_png_and_gif_accepted_and_converted(client):

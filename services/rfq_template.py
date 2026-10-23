@@ -22,6 +22,7 @@ def build_subject(job: Job, reference_code: str) -> str:
 
 
 def build_body(job: Job, company: Company, reference_code: str, sender_name: str) -> str:
+    project_line = f"\nProject type: {job.project_type}." if getattr(job, "project_type", None) else ""
     timeframe_line = f"\nWhen the work needs to be done: {job.timeframe}." if getattr(job, "timeframe", None) else ""
     deadline_line = f"\nWe'd appreciate a reply by {job.deadline}." if job.deadline else ""
     return f"""Hi {company.name} team,
@@ -31,7 +32,7 @@ My name is {sender_name}. I'm requesting a quote for the following job in {job.l
 {job.description}
 
 {_budget_line(job)}
-{timeframe_line}{deadline_line}
+{project_line}{timeframe_line}{deadline_line}
 
 Could you please reply with:
 - Your quoted price (fixed, range, or hourly rate)

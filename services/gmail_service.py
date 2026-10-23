@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import datetime
 import mimetypes
+import re
 from email import encoders
 from email.header import Header
 from email.mime.base import MIMEBase
@@ -28,17 +29,29 @@ def _service():
     return build("gmail", "v1", credentials=creds)
 
 
-def _attach_file(message: MIMEMultipart, path: Path) -> None:
+_STORAGE_PREFIX = re.compile(r"^[0-9a-f]{6,12}_(?=.)")
+
+
+def display_name(path: Path, photo_number: int) -> str:
+    """The file name a supplier sees. We store files with a random prefix; strip it, and give anonymous photos a
+    readable name (photo-1.jpg) instead of random hex. Documents keep the customer's own name for them."""
+    if path.suffix.lower() == ".pdf":
+        return _STORAGE_PREFIX.sub("", path.name)
+    return f"photo-{photo_number}{path.suffix.lower() or '.jpg'}"
+
+
+def _attach_file(message: MIMEMultipart, path: Path, photo_number: int = 1) -> None:
     mime_type, _ = mimetypes.guess_type(path.name)
     maintype, _, subtype = (mime_type or "application/octet-stream").partition("/")
     data = path.read_bytes()
+    name = display_name(path, photo_number)
     if maintype == "image":
-        part = MIMEImage(data, _subtype=subtype, name=path.name)
+        part = MIMEImage(data, _subtype=subtype, name=name)
     else:
         part = MIMEBase(maintype, subtype)
         part.set_payload(data)
         encoders.encode_base64(part)
-    part.add_header("Content-Disposition", "attachment", filename=path.name)
+    part.add_header("Content-Disposition", "attachment", filename=name)
     message.attach(part)
 
 
@@ -47,8 +60,11 @@ def build_mime_message(to: str, subject: str, body: str, attachment_paths: list[
     if valid_attachments:
         message = MIMEMultipart()
         message.attach(MIMEText(body, _charset="utf-8"))
+        photo_number = 0
         for path in valid_attachments:
-            _attach_file(message, path)
+            if path.suffix.lower() != ".pdf":
+                photo_number += 1
+            _attach_file(message, path, photo_number)
     else:
         message = MIMEText(body, _charset="utf-8")
 

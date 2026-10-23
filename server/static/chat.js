@@ -3,6 +3,9 @@
 
   const TOKEN_KEY = "qs_token";
   const MAX_FILES = 6;
+  const MAX_PDFS = 4;
+  const MAX_PDF_BYTES = 10 * 1000 * 1000;
+  const isPdf = (f) => f.type === "application/pdf" || /\.pdf$/i.test(f.name || "");
   const $ = (id) => document.getElementById(id);
 
   const els = {
@@ -37,22 +40,33 @@
     if (last < text.length) container.appendChild(document.createTextNode(text.slice(last)));
   }
 
-  function scrollDown() { els.log.scrollTop = els.log.scrollHeight; }
+  // Only follow new messages if the reader is already at (or near) the bottom, so scrolling up to re-read is never
+  // yanked away by a reply or the typing indicator. Your own messages always scroll into view.
+  function nearBottom() { return els.log.scrollHeight - els.log.scrollTop - els.log.clientHeight < 140; }
+  function scrollDown(force) { if (force || nearBottom()) els.log.scrollTop = els.log.scrollHeight; }
 
-  function addBubble(role, text, thumbUrls) {
+  function addBubble(role, text, attachments) {
     els.hero.hidden = true;
     els.chat.classList.remove("landing");
     const div = document.createElement("div");
     div.className = "bubble " + role;
     if (text) { role === "bot" ? linkify(div, text) : div.appendChild(document.createTextNode(text)); }
-    if (thumbUrls && thumbUrls.length) {
+    if (attachments && attachments.length) {
       const wrap = document.createElement("div");
       wrap.className = "thumbs";
-      thumbUrls.forEach((u) => { const img = document.createElement("img"); img.src = u; img.alt = "Attached photo"; wrap.appendChild(img); });
+      attachments.forEach((a) => {
+        if (a.isPdf) {
+          const chip = document.createElement("span"); chip.className = "doc-chip"; chip.textContent = "PDF · " + a.name;
+          wrap.appendChild(chip);
+        } else {
+          const img = document.createElement("img"); img.src = a.url; img.alt = "Attached photo"; wrap.appendChild(img);
+        }
+      });
       div.appendChild(wrap);
     }
+    const stick = role === "user" || nearBottom(); // measured BEFORE the new bubble makes the list taller
     els.log.appendChild(div);
-    scrollDown();
+    if (stick) scrollDown(true);
     return div;
   }
 
@@ -60,7 +74,9 @@
     let t = document.getElementById("typing");
     if (on && !t) {
       t = document.createElement("div"); t.id = "typing"; t.className = "typing"; t.textContent = "Typing...";
-      els.log.appendChild(t); scrollDown();
+      const stick = nearBottom();
+      els.log.appendChild(t);
+      if (stick) scrollDown(true);
     } else if (!on && t) { t.remove(); }
   }
 
@@ -70,11 +86,18 @@
     els.previews.textContent = "";
     els.previews.hidden = pending.length === 0;
     pending.forEach((p, i) => {
-      const wrap = document.createElement("div"); wrap.className = "preview";
-      const img = document.createElement("img"); img.src = p.url; img.alt = "Photo to send";
-      const rm = document.createElement("button"); rm.type = "button"; rm.textContent = "×"; rm.setAttribute("aria-label", "Remove photo");
-      rm.addEventListener("click", () => { URL.revokeObjectURL(p.url); pending.splice(i, 1); renderPreviews(); });
-      wrap.append(img, rm); els.previews.appendChild(wrap);
+      const wrap = document.createElement("div"); wrap.className = p.isPdf ? "preview pdf" : "preview";
+      const rm = document.createElement("button"); rm.type = "button"; rm.textContent = "×"; rm.setAttribute("aria-label", "Remove attachment");
+      rm.addEventListener("click", () => { if (p.url) URL.revokeObjectURL(p.url); pending.splice(i, 1); renderPreviews(); });
+      if (p.isPdf) {
+        const icon = document.createElement("span"); icon.className = "pdf-icon"; icon.textContent = "PDF";
+        const name = document.createElement("span"); name.className = "pdf-name"; name.textContent = p.name;
+        wrap.append(icon, name, rm);
+      } else {
+        const img = document.createElement("img"); img.src = p.url; img.alt = "Photo to send";
+        wrap.append(img, rm);
+      }
+      els.previews.appendChild(wrap);
     });
   }
 
@@ -120,7 +143,7 @@
 
     form.append(intro, name.wrap, mobile.wrap, email.wrap, consentLabel, err, submit);
     els.log.appendChild(form);
-    scrollDown();
+    scrollDown(true);
     name.input.focus();
 
     form.addEventListener("submit", async (e) => {
@@ -214,8 +237,9 @@
     if (!ok) { store.clear(); return; }
     token = saved;
     els.newChat.hidden = false;
-    data.messages.forEach((m) => addBubble(m.role, m.text || (m.photos ? "(" + m.photos + " photo" + (m.photos > 1 ? "s" : "") + ")" : "")));
+    data.messages.forEach((m) => addBubble(m.role, m.text || (m.photos ? "(" + m.photos + " attachment" + (m.photos > 1 ? "s" : "") + ")" : "")));
     applyState(data.state, data.job, data.needs_details, data.review_pending);
+    scrollDown(true);
   }
 
   // ---- Photos: shrink in the browser (smaller upload, and canvas re-encoding drops location metadata) ----
@@ -243,9 +267,17 @@
     const chosen = Array.from(els.files.files);
     els.files.value = "";
     for (const f of chosen) {
-      if (pending.length >= MAX_FILES) { setError("You can attach up to " + MAX_FILES + " photos at a time."); break; }
-      const blob = await compress(f);
-      pending.push({ blob, url: URL.createObjectURL(blob), name: f.name });
+      if (pending.length >= MAX_FILES) { setError("You can attach up to " + MAX_FILES + " files at a time."); break; }
+      if (isPdf(f)) {
+        if (f.size > MAX_PDF_BYTES) { setError(f.name + " is over 10MB. Try a smaller or compressed PDF."); continue; }
+        if (pending.filter((p) => p.isPdf).length >= MAX_PDFS) { setError("You can attach up to " + MAX_PDFS + " PDFs at a time."); continue; }
+        pending.push({ blob: f, url: null, name: f.name, isPdf: true }); // PDFs are sent as-is; the server cleans them
+      } else if (f.type.startsWith("image/")) {
+        const blob = await compress(f);
+        pending.push({ blob, url: URL.createObjectURL(blob), name: f.name, isPdf: false });
+      } else {
+        setError(f.name + " isn't a photo or PDF.");
+      }
     }
     renderPreviews();
   });
@@ -260,11 +292,12 @@
     if (!(await ensureSession())) { busy = false; els.sendBtn.disabled = false; return; }
 
     removeDetailsCard();
-    const thumbs = pending.map((p) => p.url);
-    addBubble("user", text, thumbs);
+    addBubble("user", text, pending.map((p) => ({ url: p.url, name: p.name, isPdf: p.isPdf })));
     const form = new FormData();
     form.append("token", token); form.append("text", text);
-    pending.forEach((p, i) => form.append("files", p.blob, (p.name || "photo" + i).replace(/\.[^.]+$/, "") + ".jpg"));
+    pending.forEach((p, i) => form.append(
+      "files", p.blob, p.isPdf ? p.name : (p.name || "photo" + i).replace(/\.[^.]+$/, "") + ".jpg",
+    ));
     if (forcedText === undefined) els.text.value = "";
     els.text.style.height = "auto";
     els.quick.hidden = true;
