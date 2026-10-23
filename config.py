@@ -39,6 +39,9 @@ GLOBAL_DAILY_JOBS = int(env("GLOBAL_DAILY_JOBS", "50"))
 # New chats one IP may open per rolling 24h. Needed because mobile numbers aren't SMS-verified yet.
 IP_DAILY_SESSIONS = int(env("IP_DAILY_SESSIONS", "20"))
 MAX_MESSAGES_PER_SESSION = int(env("MAX_MESSAGES_PER_SESSION", "60"))
+# Chats now start before we know who the customer is, so cap total website messages per rolling 24h.
+# Each message costs roughly half a cent of AI usage, so the default bounds worst-case spend to a few dollars a day.
+GLOBAL_DAILY_MESSAGES = int(env("GLOBAL_DAILY_MESSAGES", "1500"))
 
 # --- Safety -----------------------------------------------------------------
 # dry_run: nothing is sent to anyone (messages are only recorded). live: real sends.

@@ -162,3 +162,17 @@ def test_bare_yes_while_collecting_with_missing_required_field_is_not_a_confirma
     handle_message(db, user, "leaking tap", model_fn=scripted(ask_loc))
     replies = handle_message(db, user, "yes", model_fn=scripted(ask_loc))
     assert replies == [FALLBACK_QUESTIONS["location_text"]]
+
+
+def test_website_mode_does_not_ask_for_a_name(db, user):
+    """The website collects the first name with the contact details afterwards, so the agent goes straight to the summary."""
+    fake = scripted(IntakeUpdate(**FULL, next_question=None))
+    replies = handle_message(db, user, "plumber carlton leaking tap", model_fn=fake, require_name=False)
+    assert "Reply YES to start" in replies[0]
+    assert FALLBACK_QUESTIONS["user_name"] not in replies
+
+
+def test_whatsapp_mode_still_asks_for_a_name(db, user):
+    fake = scripted(IntakeUpdate(**FULL, next_question=None))
+    replies = handle_message(db, user, "plumber carlton leaking tap", model_fn=fake)  # default require_name=True
+    assert replies == [FALLBACK_QUESTIONS["user_name"]]

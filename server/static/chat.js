@@ -6,16 +6,16 @@
   const $ = (id) => document.getElementById(id);
 
   const els = {
-    start: $("start"), startForm: $("start-form"), startBtn: $("start-btn"), startError: $("start-error"),
-    mobile: $("mobile"), email: $("email"), consent: $("consent"),
-    chat: $("chat"), log: $("log"), quick: $("quick"), previews: $("previews"), chatError: $("chat-error"),
+    chat: $("chat"), log: $("log"), hero: $("hero"), chips: $("chips"), quick: $("quick"),
+    previews: $("previews"), chatError: $("chat-error"),
     composer: $("composer"), files: $("files"), text: $("text"), sendBtn: $("send-btn"), newChat: $("new-chat"),
   };
 
   let token = null;
-  let pending = []; // [{blob, url}] photos waiting to be sent
+  let pending = []; // [{blob, url, name}] photos waiting to be sent
   let busy = false;
   let finished = false; // confirmed or limit reached: the composer is closed
+  let needsDetails = true;
 
   const store = {
     get() { try { return localStorage.getItem(TOKEN_KEY); } catch (e) { return null; } },
@@ -37,7 +37,10 @@
     if (last < text.length) container.appendChild(document.createTextNode(text.slice(last)));
   }
 
+  function scrollDown() { els.log.scrollTop = els.log.scrollHeight; }
+
   function addBubble(role, text, thumbUrls) {
+    els.hero.hidden = true;
     const div = document.createElement("div");
     div.className = "bubble " + role;
     if (text) { role === "bot" ? linkify(div, text) : div.appendChild(document.createTextNode(text)); }
@@ -48,7 +51,7 @@
       div.appendChild(wrap);
     }
     els.log.appendChild(div);
-    els.log.scrollTop = els.log.scrollHeight;
+    scrollDown();
     return div;
   }
 
@@ -56,7 +59,7 @@
     let t = document.getElementById("typing");
     if (on && !t) {
       t = document.createElement("div"); t.id = "typing"; t.className = "typing"; t.textContent = "Typing...";
-      els.log.appendChild(t); els.log.scrollTop = els.log.scrollHeight;
+      els.log.appendChild(t); scrollDown();
     } else if (!on && t) { t.remove(); }
   }
 
@@ -74,11 +77,74 @@
     });
   }
 
-  function quickButton(label, onClick, main) {
+  function button(label, onClick, main) {
     const b = document.createElement("button"); b.type = "button"; b.textContent = label;
     if (main) b.className = "main";
     b.addEventListener("click", onClick);
     return b;
+  }
+
+  // ---- The contact-details card, shown only once the request has been refined ----
+  function field(labelText, id, type, attrs) {
+    const wrap = document.createElement("div"); wrap.className = "field";
+    const label = document.createElement("label"); label.htmlFor = id; label.textContent = labelText;
+    const input = document.createElement("input"); input.id = id; input.type = type;
+    Object.entries(attrs || {}).forEach(([k, v]) => input.setAttribute(k, v));
+    wrap.append(label, input);
+    return { wrap, input };
+  }
+
+  function removeDetailsCard() { const f = $("details-form"); if (f) f.remove(); }
+
+  function showDetailsCard() {
+    if ($("details-form")) { $("details-name").focus(); return; }
+    els.quick.hidden = true;
+    const form = document.createElement("form");
+    form.id = "details-form"; form.className = "bubble bot details"; form.noValidate = true;
+
+    const intro = document.createElement("p");
+    intro.textContent = "Almost there! Who should I sign the requests as, and where can I send your progress link?";
+    const name = field("First name", "details-name", "text", { autocomplete: "given-name", placeholder: "Irene", maxlength: "40" });
+    const mobile = field("Mobile number", "details-mobile", "tel", { inputmode: "tel", autocomplete: "tel", placeholder: "0412 345 678" });
+    const email = field("Email", "details-email", "email", { autocomplete: "email", placeholder: "you@example.com" });
+
+    const consentLabel = document.createElement("label"); consentLabel.className = "check"; consentLabel.htmlFor = "details-consent";
+    const consent = document.createElement("input"); consent.type = "checkbox"; consent.id = "details-consent";
+    const consentText = document.createElement("span");
+    consentText.textContent = "I agree that Quoteschmote can contact suppliers on my behalf using my first name, job details and photos. My mobile and email are not shared with suppliers.";
+    consentLabel.append(consent, consentText);
+
+    const err = document.createElement("p"); err.className = "error"; err.setAttribute("role", "alert");
+    const submit = document.createElement("button"); submit.type = "submit"; submit.className = "primary"; submit.textContent = "Request quotes";
+
+    form.append(intro, name.wrap, mobile.wrap, email.wrap, consentLabel, err, submit);
+    els.log.appendChild(form);
+    scrollDown();
+    name.input.focus();
+
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      err.textContent = ""; submit.disabled = true;
+      try {
+        const { ok, data } = await api("/api/chat/contact", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ token, name: name.input.value, mobile: mobile.input.value, email: email.input.value, consent: consent.checked }),
+        });
+        if (ok) {
+          form.remove();
+          data.replies.forEach((r) => addBubble("bot", r));
+          applyState(data.state, data.job, data.needs_details);
+        } else if (data && data.state === "limit_reached") {
+          form.remove();
+          (data.replies || [data.message]).forEach((r) => addBubble("bot", r));
+          applyState("limit_reached", null, true);
+        } else {
+          err.textContent = (data && data.message) || "Something went wrong. Please try again.";
+        }
+      } catch (ex) {
+        err.textContent = "Can't reach the server. Check your connection and try again.";
+      } finally { submit.disabled = false; }
+    });
   }
 
   function renderQuick(state, job) {
@@ -86,22 +152,24 @@
     els.quick.hidden = true;
     if (state === "awaiting_confirm") {
       els.quick.append(
-        quickButton("Yes, request quotes", () => send("YES"), true),
-        quickButton("Change something", () => { els.text.placeholder = "What would you like to change?"; els.text.focus(); }),
-        quickButton("Cancel", () => send("CANCEL")),
+        button("Yes, request quotes", () => (needsDetails ? showDetailsCard() : send("YES")), true),
+        button("Change something", () => { removeDetailsCard(); els.text.placeholder = "What would you like to change?"; els.text.focus(); }),
+        button("Cancel", () => send("CANCEL")),
       );
       els.quick.hidden = false;
     } else if (state === "confirmed" && job) {
       const a = document.createElement("a"); a.className = "main"; a.href = job.track_url; a.textContent = "Track progress";
-      els.quick.append(a, quickButton("Start another request", resetChat));
+      els.quick.append(a, button("Start another request", resetChat));
       els.quick.hidden = false;
     } else if (state === "limit_reached") {
-      els.quick.append(quickButton("Back to start", resetChat));
+      els.quick.append(button("Back to start", resetChat));
       els.quick.hidden = false;
     }
   }
 
-  function applyState(state, job) {
+  function applyState(state, job, needs) {
+    needsDetails = needs !== false;
+    if (state === "need_details") { state = "awaiting_confirm"; renderQuick(state, job); showDetailsCard(); return; }
     finished = state === "confirmed" || state === "limit_reached";
     els.text.disabled = finished; els.sendBtn.disabled = finished; els.files.disabled = finished;
     els.composer.hidden = finished;
@@ -116,16 +184,23 @@
     return { ok: res.ok, status: res.status, data };
   }
 
-  function showChat() {
-    els.start.hidden = true; els.chat.hidden = false; els.newChat.hidden = false;
+  function resetChat() {
+    store.clear(); token = null; pending = []; finished = false; needsDetails = true;
+    els.log.querySelectorAll(".bubble, .typing").forEach((n) => n.remove());
+    els.hero.hidden = false;
+    els.quick.hidden = true; els.previews.hidden = true; setError("");
+    els.composer.hidden = false; els.text.disabled = false; els.sendBtn.disabled = false; els.files.disabled = false;
+    els.text.value = ""; els.text.style.height = "auto"; els.text.placeholder = "Describe the job you need quoted...";
+    els.newChat.hidden = true;
   }
 
-  function resetChat() {
-    store.clear(); token = null; pending = []; finished = false;
-    els.log.textContent = ""; els.quick.hidden = true; els.previews.hidden = true; setError("");
-    els.composer.hidden = false; els.text.disabled = false; els.sendBtn.disabled = false; els.files.disabled = false;
-    els.text.value = ""; els.text.placeholder = "Describe the job...";
-    els.chat.hidden = true; els.newChat.hidden = true; els.start.hidden = false;
+  async function ensureSession() {
+    if (token) return true;
+    const { ok, data } = await api("/api/chat/start", { method: "POST" });
+    if (!ok) { setError((data && data.message) || "Something went wrong. Please try again."); return false; }
+    token = data.token; store.set(token);
+    els.newChat.hidden = false;
+    return true;
   }
 
   async function restore() {
@@ -134,9 +209,9 @@
     const { ok, data } = await api("/api/chat/state?token=" + encodeURIComponent(saved));
     if (!ok) { store.clear(); return; }
     token = saved;
-    showChat();
+    els.newChat.hidden = false;
     data.messages.forEach((m) => addBubble(m.role, m.text || (m.photos ? "(" + m.photos + " photo" + (m.photos > 1 ? "s" : "") + ")" : "")));
-    applyState(data.state, data.job);
+    applyState(data.state, data.job, data.needs_details);
   }
 
   // ---- Photos: shrink in the browser (smaller upload, and canvas re-encoding drops location metadata) ----
@@ -178,6 +253,9 @@
     if (!text && pending.length === 0) return;
 
     busy = true; els.sendBtn.disabled = true; setError("");
+    if (!(await ensureSession())) { busy = false; els.sendBtn.disabled = false; return; }
+
+    removeDetailsCard();
     const thumbs = pending.map((p) => p.url);
     addBubble("user", text, thumbs);
     const form = new FormData();
@@ -192,7 +270,7 @@
     try {
       const { ok, status, data } = await api("/api/chat/message", { method: "POST", body: form });
       setTyping(false);
-      if (status === 401) { resetChat(); els.startError.textContent = "Your session expired. Please start again."; return; }
+      if (status === 401) { resetChat(); setError("Your session expired. Please start again."); return; }
       if (!ok) {
         setError((data && data.message) || "Something went wrong. Please try again.");
         // Put the photos back so the user doesn't have to re-add them
@@ -200,10 +278,9 @@
         if (forcedText === undefined) els.text.value = text;
         return;
       }
-      sentPending.forEach((p) => { /* keep blob URLs alive: the sent bubble still shows them */ });
       data.replies.forEach((r) => addBubble("bot", r));
       els.text.placeholder = "Type your reply...";
-      applyState(data.state, data.job);
+      applyState(data.state, data.job, data.needs_details);
     } catch (e) {
       setTyping(false);
       setError("Can't reach the server. Check your connection and try again.");
@@ -226,28 +303,12 @@
   });
   els.newChat.addEventListener("click", resetChat);
 
-  // ---- Start ----
-  els.startForm.addEventListener("submit", async (e) => {
-    e.preventDefault();
-    els.startError.textContent = "";
-    els.startBtn.disabled = true;
-    try {
-      const { ok, data } = await api("/api/chat/start", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ mobile: els.mobile.value, email: els.email.value, consent: els.consent.checked }),
-      });
-      if (!ok) { els.startError.textContent = (data && data.message) || "Something went wrong. Please try again."; return; }
-      token = data.token; store.set(token);
-      showChat();
-      data.messages.forEach((m) => addBubble(m.role, m.text));
-      applyState(data.state, data.job);
-      els.text.focus();
-    } catch (err) {
-      els.startError.textContent = "Can't reach the server. Check your connection and try again.";
-    } finally {
-      els.startBtn.disabled = false;
-    }
-  });
+  // Example chips pre-fill the box so a visitor can start with one tap
+  els.chips.querySelectorAll(".chip-btn").forEach((b) => b.addEventListener("click", () => {
+    els.text.value = b.dataset.text + " ";
+    els.text.dispatchEvent(new Event("input"));
+    els.text.focus();
+  }));
 
   restore();
 })();

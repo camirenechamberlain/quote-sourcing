@@ -245,8 +245,13 @@ def handle_message(
     media_paths: list[str] | None = None,
     model_fn: ModelFn | None = None,
     confirm_message: Callable[[Job], str] | None = None,
+    require_name: bool = True,
 ) -> list[str]:
-    """Process one inbound user message. Returns the replies to send back. Caller commits `db`."""
+    """Process one inbound user message. Returns the replies to send back. Caller commits `db`.
+
+    `require_name=False` is used by the website chat, which collects the first name together with the
+    mobile and email *after* the request is refined, instead of asking for it mid-conversation.
+    """
     model_fn = model_fn or run_intake_model  # resolved at call time so tests can patch it
     text = (text or "").strip()
     media_paths = media_paths or []
@@ -282,7 +287,7 @@ def handle_message(
     if session.state == "collecting" and command in YES_WORDS and not media_paths:
         draft = session.draft or {}
         if all(draft.get(f) for f in REQUIRED_FIELDS):
-            if not user.name:
+            if require_name and not user.name:
                 session.questions_asked += 1
                 return [FALLBACK_QUESTIONS["user_name"]]
             session.state = "awaiting_confirm"
@@ -299,7 +304,7 @@ def handle_message(
         return ["Tell me what you need done and where, and attach photos if you have them."]
 
     # --- Model step (skipped when the user is just answering "what's your first name?") ----
-    if not user.name and text and _last_outbound(db, user) == FALLBACK_QUESTIONS["user_name"] and len(text.split()) <= 3:
+    if require_name and not user.name and text and _last_outbound(db, user) == FALLBACK_QUESTIONS["user_name"] and len(text.split()) <= 3:
         user.name = re.sub(r"[^A-Za-z'\- ]", "", text).strip().split()[0].title() if re.search(r"[A-Za-z]", text) else None
         update = IntakeUpdate(next_question=None)
     else:
@@ -328,7 +333,7 @@ def handle_message(
         question = update.next_question or FALLBACK_QUESTIONS[required_missing[0]]
     elif update.next_question and can_ask_optional:
         question = update.next_question
-    elif not user.name:
+    elif require_name and not user.name:
         question = FALLBACK_QUESTIONS["user_name"]
 
     if question:

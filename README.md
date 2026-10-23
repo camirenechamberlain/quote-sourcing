@@ -45,9 +45,10 @@ Local tool to source and compare trade quotes: describe a job, find nearby compa
 
 ## Quoteschmote website chat
 
-A mobile-first chat page (`server/static/`) in front of the intake agent. Customers enter a mobile and email, describe the
-job, attach photos, review a summary and confirm. A confirmed request becomes a `QUEUED` job (visible in the Streamlit
-pages) and the customer gets a private progress link (`/j/<token>`).
+A mobile-first chat page (`server/static/`) in front of the intake agent. The landing page is just the chat: the customer
+describes the job and attaches photos, the agent refines it, shows a summary, and only then asks for first name, mobile,
+email and consent. A confirmed request becomes a `QUEUED` job (visible in the Streamlit pages) and the customer gets a
+private progress link (`/j/<token>`).
 
 Run it:
 
@@ -58,7 +59,10 @@ Run it:
 Then open http://localhost:8000. Tests: `.venv\Scripts\python.exe -m pytest tests -q`.
 
 Limits and safety (all in `.env`, see `.env.example`):
-- `DAILY_QUOTE_LIMIT` quote requests per mobile per rolling 24h (default 10), enforced at start **and** at confirmation.
+- `DAILY_QUOTE_LIMIT` quote requests per mobile per rolling 24h (default 10), enforced at the contact-details step,
+  i.e. the moment a request would become a job.
+- `GLOBAL_DAILY_MESSAGES` caps total website chat messages per 24h (default 1500). Chats start before we know who the
+  customer is, so this bounds AI spend from anonymous use.
 - `GLOBAL_DAILY_JOBS` across all customers, `IP_DAILY_SESSIONS` per IP, `MAX_MESSAGES_PER_SESSION` per chat.
 - Mobile numbers are **not SMS-verified yet** (`User.mobile_verified` is always false), so the per-number limit can be
   dodged with other numbers; the IP and global caps are the real backstop until verification is added.

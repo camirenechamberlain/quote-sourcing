@@ -31,12 +31,6 @@ MAX_FILES_PER_MESSAGE = 6
 MAX_PHOTOS_PER_REQUEST = 12
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
-GREETING = (
-    "Hi! Tell me what you need done and where, and attach photos if you have them. "
-    "I'll make sure I have what suppliers need, then request quotes for you."
-)
-
-
 # --- Small in-memory rate limiter (single process; fine for the MVP) ---------------------------------
 class SlidingWindow:
     def __init__(self, limit: int, seconds: int):
@@ -101,6 +95,30 @@ def jobs_global_24h(db) -> int:
     return db.query(Job).filter(Job.user_id.isnot(None), Job.created_at >= _since()).count()
 
 
+def web_messages_global_24h(db) -> int:
+    """Inbound website chat messages in the last 24h (all customers, including those who haven't given contact details)."""
+    return (
+        db.query(WaMessage)
+        .join(User, WaMessage.user_id == User.id)
+        .filter(User.whatsapp_number.like("web:%"), WaMessage.direction == "in", WaMessage.created_at >= _since())
+        .count()
+    )
+
+
+def clean_first_name(raw: str) -> str:
+    match = re.match(r"\s*([A-Za-z][A-Za-z'\-]{0,39})", raw or "")
+    if not match:
+        raise ValueError("Please enter your first name.")
+    return match.group(1).title()
+
+
+def validate_email(raw: str) -> str:
+    email = (raw or "").strip().lower()
+    if len(email) > 254 or not EMAIL_RE.match(email):
+        raise ValueError("Please enter a valid email address.")
+    return email
+
+
 def limit_reached_message() -> str:
     return (
         f"You've reached today's limit of {config.DAILY_QUOTE_LIMIT} quote requests for this number. "
@@ -135,7 +153,7 @@ def _state(db, user: User, request: Request) -> dict:
         if session.state == "confirmed" and session.job_id:
             j = db.get(Job, session.job_id)
             job = {"ref": j.ref_prefix, "track_url": f"{public_base(request)}/j/{j.public_token}"}
-    return {"state": state, "job": job}
+    return {"state": state, "job": job, "needs_details": not user.mobile}
 
 
 def _log_message(db, user: User, direction: str, body: str, media: list[str] | None = None) -> None:
@@ -143,46 +161,94 @@ def _log_message(db, user: User, direction: str, body: str, media: list[str] | N
 
 
 # --- API -----------------------------------------------------------------------------------------------
-class StartBody(BaseModel):
-    mobile: str
-    email: str
-    consent: bool = False
-
-
 @router.post("/api/chat/start")
-def start_chat(body: StartBody, request: Request):
+def start_chat(request: Request):
+    """Open an anonymous chat. Contact details are collected later, once the request has been refined."""
     ip = client_ip(request)
     if not start_limiter.allow(ip):
         return JSONResponse({"error": "slow_down", "message": "Too many attempts. Please wait a few minutes."}, status_code=429)
-    if not body.consent:
-        return JSONResponse({"error": "consent", "message": "Please tick the box to continue."}, status_code=400)
-    try:
-        mobile = normalise_mobile(body.mobile)
-    except ValueError as exc:
-        return JSONResponse({"error": "mobile", "message": str(exc)}, status_code=400)
-    email = (body.email or "").strip().lower()
-    if len(email) > 254 or not EMAIL_RE.match(email):
-        return JSONResponse({"error": "email", "message": "Please enter a valid email address."}, status_code=400)
 
     db = get_session()
     try:
         if db.query(ChatSession).filter(ChatSession.ip == ip, ChatSession.created_at >= _since()).count() >= config.IP_DAILY_SESSIONS:
             return JSONResponse({"error": "slow_down", "message": "Too many chats from this network today. Please try tomorrow."}, status_code=429)
-        if jobs_for_mobile_24h(db, mobile) >= config.DAILY_QUOTE_LIMIT:
-            return JSONResponse({"error": "limit_reached", "message": limit_reached_message()}, status_code=429)
-        if jobs_global_24h(db) >= config.GLOBAL_DAILY_JOBS:
+        if web_messages_global_24h(db) >= config.GLOBAL_DAILY_MESSAGES or jobs_global_24h(db) >= config.GLOBAL_DAILY_JOBS:
             return JSONResponse({"error": "busy", "message": BUSY_MESSAGE}, status_code=503)
 
         token = secrets.token_urlsafe(32)
-        chat = ChatSession(token_hash=hash_token(token), user_id="pending", ip=ip)
-        user = User(whatsapp_number=f"web:{secrets.token_hex(8)}", mobile=mobile, email=email)
+        user = User(whatsapp_number=f"web:{secrets.token_hex(8)}")
         db.add(user)
         db.flush()
-        chat.user_id = user.id
-        db.add(chat)
-        _log_message(db, user, "out", GREETING)
+        db.add(ChatSession(token_hash=hash_token(token), user_id=user.id, ip=ip))
         db.commit()
-        return {"token": token, "messages": [{"role": "bot", "text": GREETING}], "state": "idle", "job": None}
+        return {"token": token, "messages": [], "state": "idle", "job": None, "needs_details": True}
+    finally:
+        db.close()
+
+
+class ContactBody(BaseModel):
+    token: str
+    name: str
+    mobile: str
+    email: str
+    consent: bool = False
+
+
+@router.post("/api/chat/contact")
+def submit_contact(body: ContactBody, request: Request):
+    """Final step: collect who the customer is, enforce the limits, then confirm the job."""
+    ip = client_ip(request)
+    if not message_limiter_ip.allow(ip) or not message_limiter_token.allow(hash_token(body.token)):
+        return JSONResponse({"error": "slow_down", "message": "Too many attempts. Give it a moment."}, status_code=429)
+    if not body.consent:
+        return JSONResponse({"error": "consent", "message": "Please tick the box to continue."}, status_code=400)
+    try:
+        name = clean_first_name(body.name)
+    except ValueError as exc:
+        return JSONResponse({"error": "name", "message": str(exc)}, status_code=400)
+    try:
+        mobile = normalise_mobile(body.mobile)
+    except ValueError as exc:
+        return JSONResponse({"error": "mobile", "message": str(exc)}, status_code=400)
+    try:
+        email = validate_email(body.email)
+    except ValueError as exc:
+        return JSONResponse({"error": "email", "message": str(exc)}, status_code=400)
+
+    db = get_session()
+    try:
+        chat, user = _load_chat(db, body.token)
+        session = (
+            db.query(IntakeSession)
+            .filter(IntakeSession.user_id == user.id, IntakeSession.state == "awaiting_confirm")
+            .first()
+        )
+        if session is None:
+            return JSONResponse({"error": "not_ready", "message": "Let's finish describing the job first."}, status_code=400)
+
+        # Limits are checked here, at the moment the request would become a job.
+        if jobs_for_mobile_24h(db, mobile) >= config.DAILY_QUOTE_LIMIT:
+            session.state = "cancelled"
+            msg = limit_reached_message()
+            _log_message(db, user, "out", msg)
+            db.commit()
+            return JSONResponse({"error": "limit_reached", "message": msg, "replies": [msg], "state": "limit_reached", "job": None}, status_code=429)
+        if jobs_global_24h(db) >= config.GLOBAL_DAILY_JOBS:
+            return JSONResponse({"error": "busy", "message": BUSY_MESSAGE}, status_code=503)
+
+        user.name, user.mobile, user.email = name, mobile, email
+
+        def confirm_text(job: Job) -> str:
+            return (
+                f"Done, {name}! Your reference is {job.ref_prefix}. I'm lining up suppliers for you now. "
+                f"Bookmark this link to follow progress: {public_base(request)}/j/{job.public_token}"
+            )
+
+        replies = intake.handle_message(db, user, "YES", [], confirm_message=confirm_text, require_name=False)
+        for r in replies:
+            _log_message(db, user, "out", r)
+        db.commit()
+        return {"replies": replies, **_state(db, user, request)}
     finally:
         db.close()
 
@@ -209,6 +275,8 @@ def chat_message(
     db = get_session()
     try:
         chat, user = _load_chat(db, token)
+        if web_messages_global_24h(db) >= config.GLOBAL_DAILY_MESSAGES:
+            return JSONResponse({"error": "busy", "message": BUSY_MESSAGE}, status_code=503)
         if chat.message_count >= config.MAX_MESSAGES_PER_SESSION:
             return JSONResponse({"error": "session_full", "message": "This chat has reached its length limit. Please start a new one."}, status_code=429)
 
@@ -218,9 +286,23 @@ def chat_message(
             .first()
         )
 
-        # Limits are enforced again at confirmation: several chats can be opened before any is confirmed.
+        wants_to_confirm = (
+            open_session is not None
+            and open_session.state == "awaiting_confirm"
+            and not files
+            and intake.normalise_command(text) in intake.YES_WORDS
+        )
+        if wants_to_confirm and not user.mobile:
+            msg = "Almost there! I just need a few contact details so I can send your progress link and sign the requests with your name."
+            _log_message(db, user, "in", text)
+            _log_message(db, user, "out", msg)
+            db.commit()
+            return {"replies": [msg], **_state(db, user, request), "state": "need_details"}
+
+        # Defensive: a chat that already has contact details is re-checked against the limits at confirmation.
         if (
-            open_session
+            user.mobile
+            and open_session
             and open_session.state == "awaiting_confirm"
             and intake.normalise_command(text) in intake.YES_WORDS
             and (jobs_for_mobile_24h(db, user.mobile) >= config.DAILY_QUOTE_LIMIT or jobs_global_24h(db) >= config.GLOBAL_DAILY_JOBS)
@@ -259,7 +341,7 @@ def chat_message(
                 f"Bookmark this link to follow progress: {public_base(request)}/j/{job.public_token}"
             )
 
-        replies = intake.handle_message(db, user, text, saved, confirm_message=confirm_text)
+        replies = intake.handle_message(db, user, text, saved, confirm_message=confirm_text, require_name=False)
         for r in replies:
             _log_message(db, user, "out", r)
         db.commit()
