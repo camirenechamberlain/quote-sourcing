@@ -143,3 +143,22 @@ def test_yes_without_an_open_request_does_not_create_a_job(db, user):
     fake = scripted(IntakeUpdate(is_job_request=False, next_question="What do you need done?"))
     handle_message(db, user, "yes", model_fn=fake)
     assert db.query(Job).filter_by(user_id=user.id).count() == 0
+
+
+def test_bare_yes_while_collecting_skips_to_summary_without_calling_the_model(db, user):
+    asks = IntakeUpdate(**FULL, user_name="Irene", next_question="Any access issues?")
+    assert handle_message(db, user, "plumber carlton tap", model_fn=scripted(asks)) == ["Any access issues?"]
+
+    def must_not_be_called(*a, **k):
+        raise AssertionError("model should not be called for a bare YES")
+
+    replies = handle_message(db, user, "yes", model_fn=must_not_be_called)
+    assert "Reply YES to start" in replies[0]
+    assert db.query(Job).filter_by(user_id=user.id).count() == 0  # the summary still needs its own YES
+
+
+def test_bare_yes_while_collecting_with_missing_required_field_is_not_a_confirmation(db, user):
+    ask_loc = IntakeUpdate(category="plumber", description="Leaking tap in the bathroom", next_question=None)
+    handle_message(db, user, "leaking tap", model_fn=scripted(ask_loc))
+    replies = handle_message(db, user, "yes", model_fn=scripted(ask_loc))
+    assert replies == [FALLBACK_QUESTIONS["location_text"]]

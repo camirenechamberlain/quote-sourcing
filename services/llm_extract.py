@@ -6,7 +6,7 @@ import os
 import anthropic
 from pydantic import BaseModel, ValidationError
 
-MODEL = "claude-haiku-4-5-20251001"
+MODEL = "claude-haiku-5-5"
 
 QUOTE_TOOL = {
     "name": "record_quote",
