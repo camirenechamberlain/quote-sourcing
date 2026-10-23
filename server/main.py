@@ -1,24 +1,51 @@
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Request, Response
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from sqlalchemy.exc import IntegrityError
 
 import config
 from db.models import IntakeSession, User, WaMessage
 from db.session import get_session
-from server import whatsapp
+from server import web_chat, whatsapp
 from server.agent import intake
 from services import attachments as attachments_service
 
 log = logging.getLogger("server")
 logging.basicConfig(level=logging.INFO)
 
-app = FastAPI(title="Quote agent")
+app = FastAPI(title="Quoteschmote", docs_url=None, redoc_url=None, openapi_url=None)
+
+STATIC_DIR = Path(__file__).resolve().parent / "static"
+app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+app.include_router(web_chat.router)
 
 WEBHOOK_PATH = "/whatsapp/webhook"
 EMPTY_TWIML = '<?xml version="1.0" encoding="UTF-8"?><Response></Response>'
+
+CSP = (
+    "default-src 'self'; img-src 'self' blob:; style-src 'self'; script-src 'self'; connect-src 'self'; "
+    "frame-ancestors 'none'; base-uri 'none'; form-action 'self'"
+)
+
+
+@app.middleware("http")
+async def security_headers(request: Request, call_next):
+    response = await call_next(request)
+    response.headers["Content-Security-Policy"] = CSP
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["Referrer-Policy"] = "no-referrer"  # progress links carry a secret token in the path
+    response.headers["X-Frame-Options"] = "DENY"
+    return response
+
+
+@app.get("/")
+def home() -> FileResponse:
+    return FileResponse(STATIC_DIR / "chat.html")
 
 
 @app.get("/healthz")

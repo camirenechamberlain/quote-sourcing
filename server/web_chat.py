@@ -1,0 +1,327 @@
+"""Website chat: the customer-facing front door. Wraps the same intake agent used for WhatsApp."""
+from __future__ import annotations
+
+import datetime
+import hashlib
+import html
+import logging
+import re
+import secrets
+import time
+from collections import defaultdict, deque
+from pathlib import Path
+
+import phonenumbers
+from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
+from fastapi.responses import HTMLResponse, JSONResponse
+from pydantic import BaseModel
+
+import config
+from db.models import ChatSession, Company, IntakeSession, Job, Quote, ReplyEmail, RfqSend, User, WaMessage
+from db.session import get_session
+from server.agent import intake
+from services import attachments as attachments_service
+from services import images
+
+log = logging.getLogger("web_chat")
+router = APIRouter()
+
+MAX_TEXT_CHARS = 2000
+MAX_FILES_PER_MESSAGE = 6
+MAX_PHOTOS_PER_REQUEST = 12
+EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
+GREETING = (
+    "Hi! Tell me what you need done and where, and attach photos if you have them. "
+    "I'll make sure I have what suppliers need, then request quotes for you."
+)
+
+
+# --- Small in-memory rate limiter (single process; fine for the MVP) ---------------------------------
+class SlidingWindow:
+    def __init__(self, limit: int, seconds: int):
+        self.limit, self.seconds = limit, seconds
+        self.hits: dict[str, deque] = defaultdict(deque)
+
+    def allow(self, key: str) -> bool:
+        now = time.monotonic()
+        q = self.hits[key]
+        while q and now - q[0] > self.seconds:
+            q.popleft()
+        if len(q) >= self.limit:
+            return False
+        q.append(now)
+        return True
+
+
+start_limiter = SlidingWindow(limit=10, seconds=600)
+message_limiter_ip = SlidingWindow(limit=40, seconds=60)
+message_limiter_token = SlidingWindow(limit=20, seconds=60)
+
+
+# --- Helpers -------------------------------------------------------------------------------------------
+def client_ip(request: Request) -> str:
+    if config.env("TRUST_PROXY_HEADERS") == "1":  # only enable when the app sits behind Cloudflare / a proxy
+        fwd = request.headers.get("CF-Connecting-IP") or (request.headers.get("X-Forwarded-For", "").split(",")[0].strip())
+        if fwd:
+            return fwd
+    return request.client.host if request.client else "unknown"
+
+
+def hash_token(token: str) -> str:
+    return hashlib.sha256(token.encode()).hexdigest()
+
+
+def normalise_mobile(raw: str) -> str:
+    try:
+        parsed = phonenumbers.parse((raw or "").strip(), "AU")
+    except phonenumbers.NumberParseException as exc:
+        raise ValueError("That doesn't look like a valid mobile number.") from exc
+    kind = phonenumbers.number_type(parsed)
+    ok_types = (phonenumbers.PhoneNumberType.MOBILE, phonenumbers.PhoneNumberType.FIXED_LINE_OR_MOBILE)
+    if not phonenumbers.is_valid_number(parsed) or kind not in ok_types:
+        raise ValueError("Please enter a valid mobile number (for example 0412 345 678).")
+    return phonenumbers.format_number(parsed, phonenumbers.PhoneNumberFormat.E164)
+
+
+def _since() -> datetime.datetime:
+    return datetime.datetime.utcnow() - datetime.timedelta(hours=24)
+
+
+def jobs_for_mobile_24h(db, mobile: str) -> int:
+    return (
+        db.query(Job)
+        .join(User, Job.user_id == User.id)
+        .filter(User.mobile == mobile, Job.created_at >= _since())
+        .count()
+    )
+
+
+def jobs_global_24h(db) -> int:
+    return db.query(Job).filter(Job.user_id.isnot(None), Job.created_at >= _since()).count()
+
+
+def limit_reached_message() -> str:
+    return (
+        f"You've reached today's limit of {config.DAILY_QUOTE_LIMIT} quote requests for this number. "
+        "Please come back tomorrow. (Higher limits are coming.)"
+    )
+
+
+BUSY_MESSAGE = "We're at capacity for today. Please try again tomorrow."
+
+
+def public_base(request: Request) -> str:
+    return config.PUBLIC_BASE_URL or str(request.base_url).rstrip("/")
+
+
+def _load_chat(db, token: str) -> tuple[ChatSession, User]:
+    if not token or len(token) > 200:
+        raise HTTPException(status_code=401, detail="invalid session")
+    chat = db.query(ChatSession).filter_by(token_hash=hash_token(token)).first()
+    if chat is None:
+        raise HTTPException(status_code=401, detail="invalid session")
+    return chat, db.get(User, chat.user_id)
+
+
+def _state(db, user: User, request: Request) -> dict:
+    session = (
+        db.query(IntakeSession).filter_by(user_id=user.id).order_by(IntakeSession.created_at.desc()).first()
+    )
+    job = None
+    state = "idle"
+    if session:
+        state = session.state
+        if session.state == "confirmed" and session.job_id:
+            j = db.get(Job, session.job_id)
+            job = {"ref": j.ref_prefix, "track_url": f"{public_base(request)}/j/{j.public_token}"}
+    return {"state": state, "job": job}
+
+
+def _log_message(db, user: User, direction: str, body: str, media: list[str] | None = None) -> None:
+    db.add(WaMessage(user_id=user.id, direction=direction, body=body, media_paths=media or [], delivery="web"))
+
+
+# --- API -----------------------------------------------------------------------------------------------
+class StartBody(BaseModel):
+    mobile: str
+    email: str
+    consent: bool = False
+
+
+@router.post("/api/chat/start")
+def start_chat(body: StartBody, request: Request):
+    ip = client_ip(request)
+    if not start_limiter.allow(ip):
+        return JSONResponse({"error": "slow_down", "message": "Too many attempts. Please wait a few minutes."}, status_code=429)
+    if not body.consent:
+        return JSONResponse({"error": "consent", "message": "Please tick the box to continue."}, status_code=400)
+    try:
+        mobile = normalise_mobile(body.mobile)
+    except ValueError as exc:
+        return JSONResponse({"error": "mobile", "message": str(exc)}, status_code=400)
+    email = (body.email or "").strip().lower()
+    if len(email) > 254 or not EMAIL_RE.match(email):
+        return JSONResponse({"error": "email", "message": "Please enter a valid email address."}, status_code=400)
+
+    db = get_session()
+    try:
+        if db.query(ChatSession).filter(ChatSession.ip == ip, ChatSession.created_at >= _since()).count() >= config.IP_DAILY_SESSIONS:
+            return JSONResponse({"error": "slow_down", "message": "Too many chats from this network today. Please try tomorrow."}, status_code=429)
+        if jobs_for_mobile_24h(db, mobile) >= config.DAILY_QUOTE_LIMIT:
+            return JSONResponse({"error": "limit_reached", "message": limit_reached_message()}, status_code=429)
+        if jobs_global_24h(db) >= config.GLOBAL_DAILY_JOBS:
+            return JSONResponse({"error": "busy", "message": BUSY_MESSAGE}, status_code=503)
+
+        token = secrets.token_urlsafe(32)
+        chat = ChatSession(token_hash=hash_token(token), user_id="pending", ip=ip)
+        user = User(whatsapp_number=f"web:{secrets.token_hex(8)}", mobile=mobile, email=email)
+        db.add(user)
+        db.flush()
+        chat.user_id = user.id
+        db.add(chat)
+        _log_message(db, user, "out", GREETING)
+        db.commit()
+        return {"token": token, "messages": [{"role": "bot", "text": GREETING}], "state": "idle", "job": None}
+    finally:
+        db.close()
+
+
+@router.post("/api/chat/message")
+def chat_message(
+    request: Request,
+    token: str = Form(...),
+    text: str = Form(""),
+    files: list[UploadFile] = File(default=[]),
+):
+    ip = client_ip(request)
+    if not message_limiter_ip.allow(ip) or not message_limiter_token.allow(hash_token(token)):
+        return JSONResponse({"error": "slow_down", "message": "You're sending messages very fast. Give it a moment."}, status_code=429)
+
+    text = (text or "").strip()
+    if len(text) > MAX_TEXT_CHARS:
+        return JSONResponse({"error": "too_long", "message": f"Please keep messages under {MAX_TEXT_CHARS} characters."}, status_code=400)
+    if len(files) > MAX_FILES_PER_MESSAGE:
+        return JSONResponse({"error": "too_many_files", "message": f"You can attach up to {MAX_FILES_PER_MESSAGE} photos at a time."}, status_code=400)
+    if not text and not files:
+        return JSONResponse({"error": "empty", "message": "Type a message or attach a photo."}, status_code=400)
+
+    db = get_session()
+    try:
+        chat, user = _load_chat(db, token)
+        if chat.message_count >= config.MAX_MESSAGES_PER_SESSION:
+            return JSONResponse({"error": "session_full", "message": "This chat has reached its length limit. Please start a new one."}, status_code=429)
+
+        open_session = (
+            db.query(IntakeSession)
+            .filter(IntakeSession.user_id == user.id, IntakeSession.state.in_(["collecting", "awaiting_confirm"]))
+            .first()
+        )
+
+        # Limits are enforced again at confirmation: several chats can be opened before any is confirmed.
+        if (
+            open_session
+            and open_session.state == "awaiting_confirm"
+            and intake.normalise_command(text) in intake.YES_WORDS
+            and (jobs_for_mobile_24h(db, user.mobile) >= config.DAILY_QUOTE_LIMIT or jobs_global_24h(db) >= config.GLOBAL_DAILY_JOBS)
+        ):
+            reached = jobs_for_mobile_24h(db, user.mobile) >= config.DAILY_QUOTE_LIMIT
+            open_session.state = "cancelled"
+            msg = limit_reached_message() if reached else BUSY_MESSAGE
+            _log_message(db, user, "in", text)
+            _log_message(db, user, "out", msg)
+            db.commit()
+            return {"replies": [msg], **_state(db, user, request), "state": "limit_reached"}
+
+        already_photos = len(open_session.photo_paths or []) if open_session else 0
+        if already_photos + len(files) > MAX_PHOTOS_PER_REQUEST:
+            return JSONResponse({"error": "too_many_photos", "message": f"A request can include up to {MAX_PHOTOS_PER_REQUEST} photos."}, status_code=400)
+
+        saved: list[str] = []
+        dest = attachments_service.ATTACHMENTS_DIR / "_incoming" / user.id
+        for f in files:
+            raw = f.file.read(images.MAX_UPLOAD_BYTES + 1)
+            try:
+                path = images.save_sanitised(raw, dest, secrets.token_hex(6))
+            except images.BadImage as exc:
+                for p in saved:
+                    Path(p).unlink(missing_ok=True)
+                return JSONResponse({"error": "bad_image", "message": f"{f.filename or 'A file'}: {exc}"}, status_code=400)
+            saved.append(str(path))
+
+        chat.message_count += 1
+        _log_message(db, user, "in", text, saved)
+        db.flush()
+
+        def confirm_text(job: Job) -> str:
+            return (
+                f"Done! Your reference is {job.ref_prefix}. I'm lining up suppliers for you now. "
+                f"Bookmark this link to follow progress: {public_base(request)}/j/{job.public_token}"
+            )
+
+        replies = intake.handle_message(db, user, text, saved, confirm_message=confirm_text)
+        for r in replies:
+            _log_message(db, user, "out", r)
+        db.commit()
+        return {"replies": replies, **_state(db, user, request)}
+    finally:
+        db.close()
+
+
+@router.get("/api/chat/state")
+def chat_state(request: Request, token: str):
+    db = get_session()
+    try:
+        chat, user = _load_chat(db, token)
+        rows = db.query(WaMessage).filter_by(user_id=user.id).order_by(WaMessage.created_at, WaMessage.id).all()
+        messages = [
+            {"role": "user" if m.direction == "in" else "bot", "text": m.body, "photos": len(m.media_paths or [])}
+            for m in rows
+        ]
+        return {"messages": messages, **_state(db, user, request)}
+    finally:
+        db.close()
+
+
+# --- Customer progress page ------------------------------------------------------------------------------
+def _supplier_status(db, job: Job, company: Company) -> str:
+    rfq = db.query(RfqSend).filter_by(job_id=job.id, company_id=company.id, status="sent").first()
+    if rfq is None:
+        return "Queued"
+    reply = db.query(ReplyEmail).filter_by(rfq_send_id=rfq.id).first()
+    if reply is None:
+        return "Request sent"
+    quote = db.query(Quote).filter_by(reply_email_id=reply.id).first()
+    return "Quote received" if quote and quote.is_quote else "Replied"
+
+
+@router.get("/j/{public_token}", response_class=HTMLResponse)
+def progress_page(public_token: str):
+    db = get_session()
+    try:
+        job = db.query(Job).filter_by(public_token=public_token).first()
+        if job is None:
+            return HTMLResponse("<h1>Not found</h1>", status_code=404)
+        companies = db.query(Company).filter_by(job_id=job.id, included=True).order_by(Company.name).all()
+        rows = [(c.name, _supplier_status(db, job, c)) for c in companies]
+        sent = sum(1 for _, s in rows if s != "Queued")
+        quotes = sum(1 for _, s in rows if s == "Quote received")
+        e = html.escape
+        if rows:
+            table = "".join(f"<tr><td>{e(n)}</td><td><span class='chip'>{e(s)}</span></td></tr>" for n, s in rows)
+            body = (
+                f"<p class='muted'>{sent} of {len(rows)} requests sent &middot; {quotes} quote(s) received</p>"
+                f"<table><thead><tr><th>Supplier</th><th>Status</th></tr></thead><tbody>{table}</tbody></table>"
+            )
+        else:
+            body = "<p>We're finding suppliers for you. This page refreshes automatically.</p>"
+        page = f"""<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1"><meta http-equiv="refresh" content="60">
+<meta name="robots" content="noindex"><title>Your quote request</title>
+<link rel="stylesheet" href="/static/chat.css"></head><body class="page">
+<main class="card"><h1 class="brand"><span class="b1">quote</span><span class="b2">schmote</span></h1>
+<h2>{e(job.title)}</h2><p class="muted">{e(job.category)} &middot; {e(job.location_text)} &middot; ref {e(job.ref_prefix)}</p>
+{body}</main></body></html>"""
+        return HTMLResponse(page)
+    finally:
+        db.close()

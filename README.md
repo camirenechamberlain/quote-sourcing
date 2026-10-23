@@ -42,3 +42,28 @@ Local tool to source and compare trade quotes: describe a job, find nearby compa
 - The double-send guard (one RFQ per company per job) and reply-dedupe are enforced at the database level, verified during development.
 - Attachments are capped at a soft 15MB total per job (Gmail's raw-message limit is ~25MB, attachments inflate ~37% once encoded) — the Review and Send page warns if you're over that.
 - Branding (colors, font, header/sidebar styling) is pulled from propertypie.com.au — see [branding.py](branding.py) if the palette changes.
+
+## Quoteschmote website chat
+
+A mobile-first chat page (`server/static/`) in front of the intake agent. Customers enter a mobile and email, describe the
+job, attach photos, review a summary and confirm. A confirmed request becomes a `QUEUED` job (visible in the Streamlit
+pages) and the customer gets a private progress link (`/j/<token>`).
+
+Run it:
+
+```
+.venv\Scripts\python.exe -m uvicorn server.main:app --port 8000
+```
+
+Then open http://localhost:8000. Tests: `.venv\Scripts\python.exe -m pytest tests -q`.
+
+Limits and safety (all in `.env`, see `.env.example`):
+- `DAILY_QUOTE_LIMIT` quote requests per mobile per rolling 24h (default 10), enforced at start **and** at confirmation.
+- `GLOBAL_DAILY_JOBS` across all customers, `IP_DAILY_SESSIONS` per IP, `MAX_MESSAGES_PER_SESSION` per chat.
+- Mobile numbers are **not SMS-verified yet** (`User.mobile_verified` is always false), so the per-number limit can be
+  dodged with other numbers; the IP and global caps are the real backstop until verification is added.
+- Photos are re-encoded server-side (location/EXIF data is stripped) and shrunk in the browser before upload.
+- Strict CSP, `Referrer-Policy: no-referrer`, hashed chat tokens, no public API docs.
+
+Putting it on quoteschmote.com from your own PC: use a Cloudflare Tunnel pointing at `localhost:8000`, then set
+`PUBLIC_BASE_URL=https://quoteschmote.com` and `TRUST_PROXY_HEADERS=1` in `.env` (only enable the latter behind the tunnel).

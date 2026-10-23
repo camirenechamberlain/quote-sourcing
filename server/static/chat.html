@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="description" content="Describe the job, add photos, and Quoteschmote asks local suppliers for quotes for you.">
+  <meta name="theme-color" content="#2E0A76">
+  <title>Quoteschmote | Get quotes without the legwork</title>
+  <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/static/chat.css">
+</head>
+<body class="app">
+  <header class="topbar">
+    <svg class="logo" viewBox="0 0 24 24" aria-hidden="true">
+      <circle cx="12" cy="12" r="10" fill="#F97A1F"/>
+      <path d="M12 2 A10 10 0 0 1 20.66 8 L12 12 Z" fill="#831B98"/>
+      <path d="M12 2 A10 10 0 0 1 16 21.86 L12 12 Z" fill="#2E0A76"/>
+    </svg>
+    <span class="brand"><span class="b1">quote</span><span class="b2">schmote</span></span>
+    <button id="new-chat" class="link-btn" type="button" hidden>New request</button>
+  </header>
+
+  <main>
+    <section id="start" class="card">
+      <h1>Get quotes without the legwork</h1>
+      <p class="lead">Describe the job and add photos. We'll check we have what suppliers need, then ask local suppliers for quotes on your behalf.</p>
+      <form id="start-form" novalidate>
+        <label for="mobile">Mobile number</label>
+        <input id="mobile" type="tel" inputmode="tel" autocomplete="tel" placeholder="0412 345 678" required>
+        <label for="email">Email</label>
+        <input id="email" type="email" autocomplete="email" placeholder="you@example.com" required>
+        <label class="check" for="consent">
+          <input id="consent" type="checkbox">
+          <span>I agree that Quoteschmote can contact suppliers on my behalf using my first name, job details and photos. My mobile and email are not shared with suppliers.</span>
+        </label>
+        <p id="start-error" class="error" role="alert"></p>
+        <button class="primary" type="submit" id="start-btn">Start</button>
+        <p class="fine">Free during beta.</p>
+      </form>
+    </section>
+
+    <section id="chat" class="chat" hidden>
+      <div id="log" class="log" aria-live="polite"></div>
+      <div id="quick" class="quick" hidden></div>
+      <div id="previews" class="previews" hidden></div>
+      <p id="chat-error" class="error chat-error" role="alert"></p>
+      <form id="composer" class="composer">
+        <label class="attach" for="files" title="Attach photos" aria-label="Attach photos">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </label>
+        <input id="files" type="file" accept="image/*" multiple hidden>
+        <textarea id="text" rows="1" maxlength="2000" placeholder="Describe the job..." aria-label="Your message"></textarea>
+        <button class="send" type="submit" id="send-btn">Send</button>
+      </form>
+    </section>
+  </main>
+
+  <script src="/static/chat.js" defer></script>
+</body>
+</html>

@@ -31,6 +31,15 @@ PUBLIC_BASE_URL = (env("PUBLIC_BASE_URL", "") or "").rstrip("/")  # public https
 # Comma-separated whatsapp numbers allowed to use the bot (beta gate). Empty = anyone.
 ALLOWED_NUMBERS = env_list("ALLOWED_NUMBERS")
 
+# --- Website chat limits ----------------------------------------------------
+# Quote requests one mobile number may confirm per rolling 24h (the paid tier raises this later).
+DAILY_QUOTE_LIMIT = int(env("DAILY_QUOTE_LIMIT", "10"))
+# Across all customers: stops a flood (or a bug) from running up costs or emailing too many suppliers.
+GLOBAL_DAILY_JOBS = int(env("GLOBAL_DAILY_JOBS", "50"))
+# New chats one IP may open per rolling 24h. Needed because mobile numbers aren't SMS-verified yet.
+IP_DAILY_SESSIONS = int(env("IP_DAILY_SESSIONS", "20"))
+MAX_MESSAGES_PER_SESSION = int(env("MAX_MESSAGES_PER_SESSION", "60"))
+
 # --- Safety -----------------------------------------------------------------
 # dry_run: nothing is sent to anyone (messages are only recorded). live: real sends.
 OUTBOUND_MODE = env("OUTBOUND_MODE", "dry_run")

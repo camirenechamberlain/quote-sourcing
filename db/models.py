@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import datetime
+import secrets
 import uuid
 
 from sqlalchemy import (
@@ -48,6 +49,8 @@ class Job(Base):
     created_at: Mapped[datetime.datetime] = mapped_column(DateTime, default=_now)
     attachment_paths: Mapped[list] = mapped_column(JSON, default=list)
     user_id: Mapped[str | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    # Unguessable token for the customer-facing progress page (/j/<token>). Never the job id.
+    public_token: Mapped[str | None] = mapped_column(String, unique=True, default=lambda: secrets.token_urlsafe(12))
 
     companies: Mapped[list["Company"]] = relationship(back_populates="job", cascade="all, delete-orphan")
 
@@ -154,6 +157,10 @@ class User(Base):
     name: Mapped[str | None] = mapped_column(String, nullable=True)
     email: Mapped[str | None] = mapped_column(String, nullable=True)
     sheet_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    # Website chats: one User row per chat session (so conversations can't leak between sessions), carrying the
+    # mobile number the customer typed. `mobile_verified` flips to True once SMS verification exists.
+    mobile: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
+    mobile_verified: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime.datetime] = mapped_column(DateTime, default=_now)
 
 
@@ -169,6 +176,19 @@ class WaMessage(Base):
     media_paths: Mapped[list] = mapped_column(JSON, default=list)
     twilio_sid: Mapped[str | None] = mapped_column(String, unique=True, nullable=True)
     delivery: Mapped[str | None] = mapped_column(String, nullable=True)  # sent | dry_run | failed (out only)
+    created_at: Mapped[datetime.datetime] = mapped_column(DateTime, default=_now)
+
+
+class ChatSession(Base):
+    """A browser chat on the website. The bearer token is only stored hashed."""
+
+    __tablename__ = "chat_sessions"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
+    token_hash: Mapped[str] = mapped_column(String, unique=True, nullable=False)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), nullable=False)
+    ip: Mapped[str | None] = mapped_column(String, nullable=True)
+    message_count: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime.datetime] = mapped_column(DateTime, default=_now)
 
 

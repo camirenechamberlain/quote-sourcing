@@ -244,6 +244,7 @@ def handle_message(
     text: str,
     media_paths: list[str] | None = None,
     model_fn: ModelFn | None = None,
+    confirm_message: Callable[[Job], str] | None = None,
 ) -> list[str]:
     """Process one inbound user message. Returns the replies to send back. Caller commits `db`."""
     model_fn = model_fn or run_intake_model  # resolved at call time so tests can patch it
@@ -261,6 +262,8 @@ def handle_message(
     if session and session.state == "awaiting_confirm" and not media_paths:
         if command in YES_WORDS:
             job = _create_job(db, user, session)
+            if confirm_message:
+                return [confirm_message(job)]
             return [
                 f"Confirmed. Your reference is {job.ref_prefix}. "
                 "I'll start contacting suppliers now and message you as quotes come in."
