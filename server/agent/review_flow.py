@@ -179,8 +179,8 @@ def current_choices(session) -> dict | None:
     }
 
 
-def format_question(q: dict, number: int, total: int, render_options: bool = True, first: bool = False) -> str:
-    """The message text. The website shows options as buttons (render_options=False); WhatsApp gets a numbered list."""
+def format_question(q: dict, number: int, total: int, first: bool = False) -> str:
+    """The message text. The options themselves are shown as buttons by the page (see current_choices)."""
     parts: list[str] = []
     if q.get("stage") == PHOTOS_FIRST_STAGE:
         return f"{q['question']}\n\nAttach photos with the paperclip, or continue without."
@@ -191,18 +191,6 @@ def format_question(q: dict, number: int, total: int, render_options: bool = Tru
         parts.append("Before I send this out, a few quick questions so suppliers can quote accurately. Tap an answer or type your own, and skip any you like.")
     head = f"{number} of {total}: " if total > 1 else ""
     parts.append(f"{head}{q['question']}")
-    if render_options:
-        lines: list[str] = []
-        if q["options"]:
-            listed = list(q["options"]) + ["Not sure"]
-            lines.append("\n".join(f"{i}) {o}" for i, o in enumerate(listed, 1)))
-            lines.append("Reply with a number, or type your own answer.")
-        if q.get("typical"):
-            lines.append(f'Not sure? Reply "typical" to use: {q["typical"]}.')
-        if q.get("photo_estimable") and not q.get("tried_estimate"):
-            lines.append("Or send a photo and I'll estimate it.")
-        if lines:
-            parts.append("\n\n".join(lines))
     return "\n\n".join(parts)
 
 
@@ -295,32 +283,32 @@ def _record(draft: dict, q: dict, answer: str) -> dict:
     return draft
 
 
-def _next(session, draft: dict, queue: list, render_options: bool) -> tuple[list[str], bool]:
+def _next(session, draft: dict, queue: list) -> tuple[list[str], bool]:
     draft[QUEUE_KEY] = queue
     session.draft = draft  # reassigned (not mutated) so SQLAlchemy sees the change
     if not queue:
         return [], True
-    return [format_question(queue[0], int(draft.get(DONE_KEY, 0)) + 1, int(draft.get(TOTAL_KEY, len(queue))), render_options)], False
+    return [format_question(queue[0], int(draft.get(DONE_KEY, 0)) + 1, int(draft.get(TOTAL_KEY, len(queue))))], False
 
 
-def _reask(session, draft: dict, queue: list, lead: str, render_options: bool) -> tuple[list[str], bool]:
+def _reask(session, draft: dict, queue: list, lead: str) -> tuple[list[str], bool]:
     draft[QUEUE_KEY] = queue
     session.draft = draft
     q = queue[0]
-    text = format_question(q, int(draft.get(DONE_KEY, 0)) + 1, int(draft.get(TOTAL_KEY, len(queue))), render_options)
+    text = format_question(q, int(draft.get(DONE_KEY, 0)) + 1, int(draft.get(TOTAL_KEY, len(queue))))
     return [f"{lead}\n\n{text}" if lead else text], False
 
 
-def _propose_estimate(session, draft, queue, q, render_options, estimate_fn) -> tuple[list[str], bool]:
+def _propose_estimate(session, draft, queue, q, estimate_fn) -> tuple[list[str], bool]:
     """One small vision call (only because the customer asked). The result is a PROPOSAL they confirm, never a silent answer."""
     used = int(draft.get(ESTIMATES_KEY, 0))
     photos = photo_estimate.image_paths(session.photo_paths)
     if not photos:
-        return _reask(session, draft, queue, "I need a photo first. Tap the paperclip to attach one and I'll estimate it.", render_options)
+        return _reask(session, draft, queue, "I need a photo first. Tap the paperclip to attach one and I'll estimate it.")
     q["tried_estimate"] = True  # one attempt per question, however it goes
     queue[0] = q
     if used >= config.MAX_ESTIMATES_PER_REQUEST:
-        return _reask(session, draft, queue, "I've used up my photo estimates for this request, so please choose or type an answer.", render_options)
+        return _reask(session, draft, queue, "I've used up my photo estimates for this request, so please choose or type an answer.")
     draft[ESTIMATES_KEY] = used + 1
     estimate_fn = estimate_fn or photo_estimate.estimate_from_photos  # resolved at call time so tests can patch it
     try:
@@ -331,7 +319,7 @@ def _propose_estimate(session, draft, queue, q, render_options, estimate_fn) -> 
     if not (est.ok and est.answer):
         return _reask(
             session, draft, queue,
-            "I couldn't work that out reliably from the photo (nothing in it gives a clear sense of scale).", render_options,
+            "I couldn't work that out reliably from the photo (nothing in it gives a clear sense of scale).",
         )
     q["proposal"] = {"answer": est.answer, "basis": est.basis, "confidence": est.confidence}
     queue[0] = q
@@ -340,12 +328,10 @@ def _propose_estimate(session, draft, queue, q, render_options, estimate_fn) -> 
     caution = "It's only a rough estimate" + (" and the photo angle makes it less certain" if est.confidence == "low" else "") + ", and suppliers will confirm on site."
     basis = f" ({est.basis.rstrip('.')})" if est.basis else ""
     message = f"From your photo, it looks {est.answer}{basis}. {caution} Does that look right?"
-    if render_options:
-        message += "\n\n" + "\n".join(f"{i}) {o}" for i, o in enumerate(CONFIRM_OPTIONS, 1)) + "\n\nReply with a number, or type the right answer."
     return [message], False
 
 
-def _answer_proposal(session, draft, queue, q, text, render_options) -> tuple[list[str], bool]:
+def _answer_proposal(session, draft, queue, q, text) -> tuple[list[str], bool]:
     proposal = q["proposal"]
     choice = resolve_option(text, CONFIRM_OPTIONS)
     cmd = normalise_command(choice)
@@ -354,20 +340,20 @@ def _answer_proposal(session, draft, queue, q, text, render_options) -> tuple[li
         draft = _record(draft, q, f"{proposal['answer']} (estimated from photo, to be confirmed on site)")
         queue.pop(0)
         draft[DONE_KEY] = int(draft.get(DONE_KEY, 0)) + 1
-        return _next(session, draft, queue, render_options)
+        return _next(session, draft, queue)
     q = {k: v for k, v in q.items() if k != "proposal"}
     queue[0] = q
     if choice == CONFIRM_OPTIONS[1] or cmd in {"NO", "NOPE", "NAH"} or is_unsure(text):
-        return _reask(session, draft, queue, "No problem.", render_options)
+        return _reask(session, draft, queue, "No problem.")
     # anything else is the customer giving the answer themselves
     draft = _record(draft, q, resolve_option(text, q["options"], q["multi"]))
     queue.pop(0)
     draft[DONE_KEY] = int(draft.get(DONE_KEY, 0)) + 1
-    return _next(session, draft, queue, render_options)
+    return _next(session, draft, queue)
 
 
 def answer_current(
-    session, text: str, new_attachments: list[str], render_options: bool = True, estimate_fn: EstimateFn | None = None,
+    session, text: str, new_attachments: list[str], estimate_fn: EstimateFn | None = None,
     review_fn: ReviewFn | None = None,
 ) -> tuple[list[str], bool]:
     """Record the customer's reply to the open question and move on. Returns (replies, finished)."""
@@ -379,10 +365,10 @@ def answer_current(
     text = (text or "").strip()
 
     if not text and not new_attachments:  # nothing usable: ask again
-        return _reask(session, draft, queue, "", render_options)
+        return _reask(session, draft, queue, "")
 
     if q.get("proposal"):
-        return _answer_proposal(session, draft, queue, q, text, render_options)
+        return _answer_proposal(session, draft, queue, q, text)
 
     if q["kind"] == "attach":
         if text and not new_attachments and normalise_command(text) not in CONTINUE_WORDS and not is_unsure(text):
@@ -392,20 +378,20 @@ def answer_current(
         if q.get("stage") == PHOTOS_FIRST_STAGE:  # photos are in (or declined): now the reviewer can look and decide what to ask
             draft[QUEUE_KEY] = []
             session.draft = draft
-            replies = _analyse(session, draft, review_fn, render_options)
+            replies = _analyse(session, draft, review_fn)
             return (replies, False) if replies else ([], True)
-        return _next(session, draft, queue, render_options)
+        return _next(session, draft, queue)
 
     # --- a normal question ---
     if not text:  # a file arrived while a question is open
         if q.get("photo_estimable") and not q.get("tried_estimate"):
-            return _propose_estimate(session, draft, queue, q, render_options, estimate_fn)  # they sent it so we can estimate
-        return _reask(session, draft, queue, "Got it, thanks.", render_options)
+            return _propose_estimate(session, draft, queue, q, estimate_fn)  # they sent it so we can estimate
+        return _reask(session, draft, queue, "Got it, thanks.")
 
     if is_estimate_request(text):
         if not q.get("photo_estimable") or q.get("tried_estimate"):
-            return _reask(session, draft, queue, "I can't estimate that one from a photo.", render_options)
-        return _propose_estimate(session, draft, queue, q, render_options, estimate_fn)
+            return _reask(session, draft, queue, "I can't estimate that one from a photo.")
+        return _propose_estimate(session, draft, queue, q, estimate_fn)
 
     if is_typical_request(text) and q.get("typical"):
         draft = _record(draft, q, f"{q['typical']} (typical for this kind of property, not measured)")
@@ -415,7 +401,7 @@ def answer_current(
             draft = _record(draft, q, answer)
     queue.pop(0)
     draft[DONE_KEY] = done + 1
-    return _next(session, draft, queue, render_options)
+    return _next(session, draft, queue)
 
 
 # ---- starting, skipping and querying the review -----------------------------------------------------------------
@@ -444,7 +430,7 @@ def _public_draft(draft: dict) -> dict:
     return {k: v for k, v in (draft or {}).items() if not k.startswith("_")}
 
 
-def run_supplier_review(session, review_fn: ReviewFn | None = None, render_options: bool = True) -> list[str] | None:
+def run_supplier_review(session, review_fn: ReviewFn | None = None) -> list[str] | None:
     """Read the finished request as a supplier would. Returns the FIRST question (the rest follow one at a time and the
     session is reopened for answers), or None if nothing needs asking. Runs at most once per request and fails open: if the
     reviewer errors, the customer is never blocked."""
@@ -460,11 +446,11 @@ def run_supplier_review(session, review_fn: ReviewFn | None = None, render_optio
         draft[DONE_KEY], draft[TOTAL_KEY] = 0, 0
         session.draft = draft
         session.state = "collecting"
-        return [format_question(question, 1, 1, render_options)]
-    return _analyse(session, draft, review_fn, render_options)
+        return [format_question(question, 1, 1)]
+    return _analyse(session, draft, review_fn)
 
 
-def _analyse(session, draft: dict, review_fn: ReviewFn | None, render_options: bool) -> list[str] | None:
+def _analyse(session, draft: dict, review_fn: ReviewFn | None) -> list[str] | None:
     """The review itself (the reviewer sees the photos). Returns what to say first, or None if nothing needs asking."""
     review_fn = review_fn or supplier_review.review_request  # resolved at call time so tests can patch it
     try:
@@ -503,5 +489,5 @@ def _analyse(session, draft: dict, review_fn: ReviewFn | None, render_options: b
     draft.setdefault(DETAILS_KEY, [])
     session.draft = draft
     session.state = "collecting"
-    question = format_question(queue[0], 1, draft[TOTAL_KEY], render_options, first=not seen)
+    question = format_question(queue[0], 1, draft[TOTAL_KEY], first=not seen)
     return [seen, question] if seen else [question]

@@ -15,11 +15,6 @@ def env(name: str, default: str | None = None) -> str | None:
     return value if value not in (None, "") else default
 
 
-def env_list(name: str) -> list[str]:
-    raw = env(name, "") or ""
-    return [item.strip() for item in raw.split(",") if item.strip()]
-
-
 # --- Models -----------------------------------------------------------------
 INTAKE_MODEL = env("INTAKE_MODEL", "claude-sonnet-5-5")
 # Supplier-eye review of the finished request (a judgement task, so same tier as intake).
@@ -35,13 +30,9 @@ ESTIMATE_MODEL = env("ESTIMATE_MODEL", "claude-haiku-5-5")
 # Photo estimates allowed per request (each is one vision call): a cost cap.
 MAX_ESTIMATES_PER_REQUEST = int(env("MAX_ESTIMATES_PER_REQUEST", "3"))
 
-# --- WhatsApp / Twilio ------------------------------------------------------
-TWILIO_ACCOUNT_SID = env("TWILIO_ACCOUNT_SID")
-TWILIO_AUTH_TOKEN = env("TWILIO_AUTH_TOKEN")
-TWILIO_WHATSAPP_FROM = env("TWILIO_WHATSAPP_FROM")  # e.g. whatsapp:+14155238886 (sandbox)
-PUBLIC_BASE_URL = (env("PUBLIC_BASE_URL", "") or "").rstrip("/")  # public https URL Twilio calls
-# Comma-separated whatsapp numbers allowed to use the bot (beta gate). Empty = anyone.
-ALLOWED_NUMBERS = env_list("ALLOWED_NUMBERS")
+# --- Website -----------------------------------------------------------------
+# Public https URL of the site (no trailing slash), used for customers' progress links, e.g. https://quoteschmote.com
+PUBLIC_BASE_URL = (env("PUBLIC_BASE_URL", "") or "").rstrip("/")
 
 # --- Website chat limits ----------------------------------------------------
 # Quote requests one mobile number may confirm per rolling 24h (the paid tier raises this later).

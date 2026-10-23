@@ -26,7 +26,7 @@ def scripted(*updates):
 
 def refined(db, user, **extra):
     """Bring a chat to the confirmation summary (awaiting_confirm) without any preferences unless given."""
-    replies = handle_message(db, user, "repaint my fence in brunswick", model_fn=scripted(IntakeUpdate(**BASE, **extra)), require_name=False)
+    replies = handle_message(db, user, "repaint my fence in brunswick", model_fn=scripted(IntakeUpdate(**BASE, **extra)))
     assert "Reply YES to start" in replies[0], replies
     return replies
 
@@ -51,9 +51,8 @@ def job_for(db, user):
 
 
 def say(db, user, text, reviewer=None, **kw):
-    """One customer message, website-style (options are buttons, not text)."""
-    kw.setdefault("render_options", False)
-    return handle_message(db, user, text, review_fn=reviewer, require_name=False, **kw)
+    """One customer message."""
+    return handle_message(db, user, text, review_fn=reviewer, **kw)
 
 
 def session_of(db, user):
@@ -215,15 +214,7 @@ def test_plain_string_questions_from_simple_reviewers_still_work(db, user):
     assert "How many storeys is the house?" in reply and "1 of" not in reply
 
 
-# ---- WhatsApp: options are a numbered list in the text ------------------------------------------------------------
-def test_whatsapp_gets_a_numbered_list_and_the_website_does_not(db, user):
-    refined(db, user, **KNOWN_PREFS)
-    reviewer = CountingReviewer(Review([CONDITION], True))
-    whatsapp = handle_message(db, user, "yes", review_fn=reviewer, require_name=False, render_options=True)[0]
-    assert "1) Peeling or flaking" in whatsapp and "3) Bare timber" in whatsapp and "4) Not sure" in whatsapp
-    assert "Reply with a number" in whatsapp
-
-
+# ---- options are buttons, never a numbered list in the text ---------------------------------------------------------
 def test_website_text_has_no_numbered_list(db, user):
     refined(db, user, **KNOWN_PREFS)
     web = say(db, user, "yes", CountingReviewer(Review([CONDITION], True)))[0]
@@ -338,7 +329,7 @@ def test_send_as_is_works_straight_from_the_summary_and_skips_the_review(db, use
 
 
 def test_send_as_is_needs_a_complete_request(db, user):
-    reply = handle_message(db, user, "send as is", model_fn=scripted(IntakeUpdate(is_job_request=False, next_question="What do you need done?")), require_name=False)
+    reply = handle_message(db, user, "send as is", model_fn=scripted(IntakeUpdate(is_job_request=False, next_question="What do you need done?")))
     assert reply == ["What do you need done?"]
 
 
@@ -371,7 +362,7 @@ def test_reviewer_gets_the_attachment_paths_and_a_draft_without_internal_keys(db
 
     photo = tmp_path / "p.jpg"
     photo.write_bytes(b"x")
-    handle_message(db, user, "repaint my fence", [str(photo)], model_fn=scripted(IntakeUpdate(**BASE, **KNOWN_PREFS)), require_name=False)
+    handle_message(db, user, "repaint my fence", [str(photo)], model_fn=scripted(IntakeUpdate(**BASE, **KNOWN_PREFS)))
     say(db, user, "yes", spy)
     assert seen["attachments"] == [str(photo)]
     assert not [k for k in seen["draft"] if k.startswith("_")]
@@ -450,7 +441,7 @@ def test_resolve_option_rules():
 def test_unknown_never_overwrites_what_the_customer_already_said(db, user):
     refined(db, user, distance_preference="local", max_distance_km=10, rating_preference="top_rated_only", timeframe="ASAP")
     follow_up = IntakeUpdate(**BASE, distance_preference="unknown", rating_preference="unknown", timeframe=None, max_distance_km=None, next_question=None)
-    handle_message(db, user, "also the gate is rusty", model_fn=scripted(follow_up), require_name=False)
+    handle_message(db, user, "also the gate is rusty", model_fn=scripted(follow_up))
     draft = session_of(db, user).draft
     assert (draft["distance_preference"], draft["max_distance_km"], draft["rating_preference"], draft["timeframe"]) == ("local", 10, "top_rated_only", "ASAP")
 

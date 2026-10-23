@@ -58,14 +58,14 @@ def jpg(tmp_path, name="drive.jpg", size=(400, 300)):
 
 def start(db, user, *questions, photos=()):
     """A chat refined to the summary, then 'yes' -> the first review question. Returns (reviewer, estimator)."""
-    handle_message(db, user, "replace my driveway", list(photos), model_fn=scripted(IntakeUpdate(**BASE, **KNOWN_PREFS)), require_name=False)
+    handle_message(db, user, "replace my driveway", list(photos), model_fn=scripted(IntakeUpdate(**BASE, **KNOWN_PREFS)))
     reviewer, estimator = Reviewer(*questions), FakeEstimator()
-    handle_message(db, user, "yes", review_fn=reviewer, require_name=False, render_options=False, estimate_fn=estimator)
+    handle_message(db, user, "yes", review_fn=reviewer, estimate_fn=estimator)
     return reviewer, estimator
 
 
-def say(db, user, text, estimator, media=(), render_options=False):
-    return handle_message(db, user, text, list(media), require_name=False, render_options=render_options, estimate_fn=estimator)
+def say(db, user, text, estimator, media=()):
+    return handle_message(db, user, text, list(media), estimate_fn=estimator)
 
 
 def session_of(db, user):
@@ -158,13 +158,6 @@ def test_typing_an_answer_while_an_estimate_is_waiting_overrides_it(db, user, tm
     assert "- Driveway width: Actually it is 4 m" in summary and "estimated" not in summary
 
 
-def test_the_proposal_can_be_answered_by_number_on_whatsapp(db, user, tmp_path):
-    _, estimator = start(db, user, WIDTH, photos=[jpg(tmp_path)])
-    reply = say(db, user, "estimate from my photo", estimator, render_options=True)[0]
-    assert "1) Yes, use that" in reply and "2) No, I'll enter it myself" in reply
-    assert "(estimated from photo" in say(db, user, "1", estimator, render_options=True)[0]
-
-
 def test_sending_a_photo_with_no_text_on_an_estimable_question_triggers_the_estimate(db, user, tmp_path):
     _, estimator = start(db, user, WIDTH)  # no photo yet
     photo = jpg(tmp_path)
@@ -224,17 +217,10 @@ def test_estimates_per_request_are_capped(db, user, tmp_path, monkeypatch):
     assert len(estimator.calls) == 1
 
 
-# ---- WhatsApp hints ----------------------------------------------------------------------------------------------------
-def test_whatsapp_text_mentions_the_typical_shortcut_and_photo_estimate(db, user):
-    handle_message(db, user, "replace my driveway", model_fn=scripted(IntakeUpdate(**BASE, **KNOWN_PREFS)), require_name=False)
-    first = handle_message(db, user, "yes", review_fn=Reviewer(WIDTH), require_name=False, render_options=True)[0]
-    assert 'Reply "typical" to use: about 3 m wide (single car).' in first
-    assert "send a photo and I'll estimate it" in first
-
-
-def test_website_text_has_no_hints_because_they_are_buttons(db, user):
-    handle_message(db, user, "replace my driveway", model_fn=scripted(IntakeUpdate(**BASE, **KNOWN_PREFS)), require_name=False)
-    first = handle_message(db, user, "yes", review_fn=Reviewer(WIDTH), require_name=False, render_options=False)[0]
+# ---- the text carries no hints: the options are buttons ----------------------------------------------------------------
+def test_the_question_text_has_no_hints_because_they_are_buttons(db, user):
+    handle_message(db, user, "replace my driveway", model_fn=scripted(IntakeUpdate(**BASE, **KNOWN_PREFS)))
+    first = handle_message(db, user, "yes", review_fn=Reviewer(WIDTH))[0]
     assert "typical" not in first and "estimate it" not in first
 
 

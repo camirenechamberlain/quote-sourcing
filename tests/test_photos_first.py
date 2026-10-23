@@ -23,7 +23,7 @@ def described(db, user, reviewer, media_paths=None, **extra):
     """The customer's first message, once it contains everything intake needs (the job and where)."""
     return handle_message(
         db, user, "repaint my fence in brunswick", media_paths=media_paths, model_fn=scripted(IntakeUpdate(**BASE, **extra)),
-        review_fn=reviewer, require_name=False, render_options=False,
+        review_fn=reviewer,
     )
 
 

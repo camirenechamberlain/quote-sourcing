@@ -16,7 +16,7 @@ def scripted(*updates: IntakeUpdate):
 
 
 def record_out(db, user, replies):
-    """Mimic the webhook: outbound replies are logged (the name-question shortcut relies on this)."""
+    """Log the outbound replies, as the website does, so the next turn sees them in the transcript."""
     for r in replies:
         db.add(WaMessage(user_id=user.id, direction="out", body=r, delivery="dry_run"))
     db.commit()
@@ -50,18 +50,12 @@ def test_missing_location_is_always_asked_even_if_model_forgets(db, user):
     assert db.query(IntakeSession).filter_by(user_id=user.id).one().state == "collecting"
 
 
-def test_complete_request_asks_for_name_then_confirms_then_creates_job(db, user, tmp_path):
+def test_complete_request_goes_to_the_summary_then_confirms_then_creates_job(db, user, tmp_path):
     photo = tmp_path / "tap.jpg"
     photo.write_bytes(b"fake-jpeg")
 
     fake = scripted(IntakeUpdate(**FULL, next_question=None))
     replies = handle_message(db, user, "plumber carlton leaking tap max $300", [str(photo)], model_fn=fake)
-    assert replies == [FALLBACK_QUESTIONS["user_name"]]
-    record_out(db, user, replies)
-
-    # Name answered: deterministic path, the model is not called again.
-    replies = handle_message(db, user, "Irene", model_fn=scripted())
-    assert user.name == "Irene"
     assert "Reply YES to start" in replies[0]
     assert "Attachments: 1 photo" in replies[0]
     assert "up to $300" in replies[0]
@@ -168,15 +162,10 @@ def test_bare_yes_while_collecting_with_missing_required_field_is_not_a_confirma
     assert replies == [FALLBACK_QUESTIONS["location_text"]]
 
 
-def test_website_mode_does_not_ask_for_a_name(db, user):
+def test_the_agent_does_not_ask_for_a_name(db, user):
     """The website collects the first name with the contact details afterwards, so the agent goes straight to the summary."""
     fake = scripted(IntakeUpdate(**FULL, next_question=None))
-    replies = handle_message(db, user, "plumber carlton leaking tap", model_fn=fake, require_name=False)
+    replies = handle_message(db, user, "plumber carlton leaking tap", model_fn=fake)
     assert "Reply YES to start" in replies[0]
-    assert FALLBACK_QUESTIONS["user_name"] not in replies
 
 
-def test_whatsapp_mode_still_asks_for_a_name(db, user):
-    fake = scripted(IntakeUpdate(**FULL, next_question=None))
-    replies = handle_message(db, user, "plumber carlton leaking tap", model_fn=fake)  # default require_name=True
-    assert replies == [FALLBACK_QUESTIONS["user_name"]]

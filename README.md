@@ -104,7 +104,7 @@ cent for four). `PHOTOS_FIRST=0` restores the older order (summary and confirm f
 
 Questions are asked **one at a time** ("2 of 4: ..."). On the website each is a row of tappable options (multi-select where
 several can apply, with a Done button); the customer can always type instead, tap "Not sure", or "Send as is" to skip the rest.
-On WhatsApp the same options arrive as a numbered list. The review runs once per request, never loops, and fails open (a
+The review runs once per request, never loops, and fails open (a
 reviewer error never blocks a customer). Settings: `REVIEW_MODEL`, `REVIEW_THOROUGH`.
 
 #### When the customer doesn't know

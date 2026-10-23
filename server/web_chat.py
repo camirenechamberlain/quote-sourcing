@@ -1,4 +1,4 @@
-"""Website chat: the customer-facing front door. Wraps the same intake agent used for WhatsApp."""
+"""Website chat: the customer-facing front door. Wraps the intake and supplier-review agents."""
 from __future__ import annotations
 
 import datetime
@@ -254,7 +254,7 @@ def submit_contact(body: ContactBody, request: Request):
                 f"Bookmark this link to follow progress: {public_base(request)}/j/{job.public_token}"
             )
 
-        replies = intake.handle_message(db, user, "YES", [], confirm_message=confirm_text, require_name=False, render_options=False)
+        replies = intake.handle_message(db, user, "YES", [], confirm_message=confirm_text)
         for r in replies:
             _log_message(db, user, "out", r)
         db.commit()
@@ -310,7 +310,7 @@ def chat_message(
         if wants_to_confirm and not user.mobile:
             _log_message(db, user, "in", text)
             # First read the request as a supplier would. If something obvious is missing, ask before asking for contact details.
-            gaps = intake.run_supplier_review(open_session, render_options=False)
+            gaps = intake.run_supplier_review(open_session)
             if gaps:
                 for g in gaps:
                     _log_message(db, user, "out", g)
@@ -381,7 +381,7 @@ def chat_message(
                 f"Bookmark this link to follow progress: {public_base(request)}/j/{job.public_token}"
             )
 
-        replies = intake.handle_message(db, user, text, saved, confirm_message=confirm_text, require_name=False, render_options=False)
+        replies = intake.handle_message(db, user, text, saved, confirm_message=confirm_text)
         for r in replies:
             _log_message(db, user, "out", r)
         db.commit()

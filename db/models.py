@@ -152,12 +152,13 @@ class AppSetting(Base):
 
 
 class User(Base):
-    """A person using the WhatsApp bot. Identified by their WhatsApp number (no login)."""
+    """A website visitor: one row per chat session, no login. `whatsapp_number` is a legacy column name (kept so existing
+    databases need no migration); it now holds a unique "web:<hex>" key."""
 
     __tablename__ = "users"
 
     id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
-    whatsapp_number: Mapped[str] = mapped_column(String, unique=True, nullable=False)  # "whatsapp:+614..."
+    whatsapp_number: Mapped[str] = mapped_column(String, unique=True, nullable=False)  # legacy name; holds "web:<hex>"
     name: Mapped[str | None] = mapped_column(String, nullable=True)
     email: Mapped[str | None] = mapped_column(String, nullable=True)
     sheet_id: Mapped[str | None] = mapped_column(String, nullable=True)
@@ -169,7 +170,7 @@ class User(Base):
 
 
 class WaMessage(Base):
-    """Every WhatsApp message in or out. `twilio_sid` is unique so webhook retries can't double-process."""
+    """Every chat message in or out. The table and `twilio_sid` column keep their original names (unused now) to avoid a migration."""
 
     __tablename__ = "wa_messages"
 
@@ -197,7 +198,7 @@ class ChatSession(Base):
 
 
 class IntakeSession(Base):
-    """One in-progress job request being collected over WhatsApp."""
+    """One in-progress job request being collected in the chat."""
 
     __tablename__ = "intake_sessions"
 
