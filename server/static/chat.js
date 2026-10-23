@@ -41,6 +41,7 @@
 
   function addBubble(role, text, thumbUrls) {
     els.hero.hidden = true;
+    els.chat.classList.remove("landing");
     const div = document.createElement("div");
     div.className = "bubble " + role;
     if (text) { role === "bot" ? linkify(div, text) : div.appendChild(document.createTextNode(text)); }
@@ -133,7 +134,7 @@
         if (ok) {
           form.remove();
           data.replies.forEach((r) => addBubble("bot", r));
-          applyState(data.state, data.job, data.needs_details);
+          applyState(data.state, data.job, data.needs_details, data.review_pending);
         } else if (data && data.state === "limit_reached") {
           form.remove();
           (data.replies || [data.message]).forEach((r) => addBubble("bot", r));
@@ -147,15 +148,18 @@
     });
   }
 
-  function renderQuick(state, job) {
+  function renderQuick(state, job, reviewPending) {
     els.quick.textContent = "";
     els.quick.hidden = true;
     if (state === "awaiting_confirm") {
       els.quick.append(
-        button("Yes, request quotes", () => (needsDetails ? showDetailsCard() : send("YES")), true),
+        button("Yes, request quotes", () => send("YES"), true),
         button("Change something", () => { removeDetailsCard(); els.text.placeholder = "What would you like to change?"; els.text.focus(); }),
         button("Cancel", () => send("CANCEL")),
       );
+      els.quick.hidden = false;
+    } else if (state === "collecting" && reviewPending) {
+      els.quick.append(button("Send as is", () => send("SEND AS IS")));
       els.quick.hidden = false;
     } else if (state === "confirmed" && job) {
       const a = document.createElement("a"); a.className = "main"; a.href = job.track_url; a.textContent = "Track progress";
@@ -167,13 +171,13 @@
     }
   }
 
-  function applyState(state, job, needs) {
+  function applyState(state, job, needs, reviewPending) {
     needsDetails = needs !== false;
-    if (state === "need_details") { state = "awaiting_confirm"; renderQuick(state, job); showDetailsCard(); return; }
+    if (state === "need_details") { state = "awaiting_confirm"; renderQuick(state, job, false); showDetailsCard(); return; }
     finished = state === "confirmed" || state === "limit_reached";
     els.text.disabled = finished; els.sendBtn.disabled = finished; els.files.disabled = finished;
     els.composer.hidden = finished;
-    renderQuick(state, job);
+    renderQuick(state, job, reviewPending);
   }
 
   // ---- Network ----
@@ -187,10 +191,10 @@
   function resetChat() {
     store.clear(); token = null; pending = []; finished = false; needsDetails = true;
     els.log.querySelectorAll(".bubble, .typing").forEach((n) => n.remove());
-    els.hero.hidden = false;
+    els.hero.hidden = false; els.chat.classList.add("landing");
     els.quick.hidden = true; els.previews.hidden = true; setError("");
     els.composer.hidden = false; els.text.disabled = false; els.sendBtn.disabled = false; els.files.disabled = false;
-    els.text.value = ""; els.text.style.height = "auto"; els.text.placeholder = "Describe the job you need quoted...";
+    els.text.value = ""; els.text.style.height = "auto"; els.text.placeholder = "e.g. Repaint 20m of timber fence in Brunswick 3056...";
     els.newChat.hidden = true;
   }
 
@@ -211,7 +215,7 @@
     token = saved;
     els.newChat.hidden = false;
     data.messages.forEach((m) => addBubble(m.role, m.text || (m.photos ? "(" + m.photos + " photo" + (m.photos > 1 ? "s" : "") + ")" : "")));
-    applyState(data.state, data.job, data.needs_details);
+    applyState(data.state, data.job, data.needs_details, data.review_pending);
   }
 
   // ---- Photos: shrink in the browser (smaller upload, and canvas re-encoding drops location metadata) ----
@@ -280,7 +284,7 @@
       }
       data.replies.forEach((r) => addBubble("bot", r));
       els.text.placeholder = "Type your reply...";
-      applyState(data.state, data.job, data.needs_details);
+      applyState(data.state, data.job, data.needs_details, data.review_pending);
     } catch (e) {
       setTyping(false);
       setError("Can't reach the server. Check your connection and try again.");

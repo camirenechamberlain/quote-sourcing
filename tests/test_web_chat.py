@@ -36,6 +36,10 @@ FULL = dict(
     title="Fix leaking bathroom tap",
     description="Bathroom vanity tap drips constantly.",
     location_text="Carlton VIC 3053",
+    distance_preference="local",
+    max_distance_km=10,
+    rating_preference="no_preference",
+    timeframe="ASAP",
     next_question=None,
 )
 
@@ -408,3 +412,49 @@ def test_home_page_and_security_headers(client):
     assert r.headers["X-Content-Type-Options"] == "nosniff"
     assert client.get("/static/chat.js").status_code == 200
     assert client.get("/docs").status_code == 404  # no public API docs
+
+
+# ---- supplier review on the website: it runs before the contact card -------------------------------------------
+def gap_reviewer(monkeypatch):
+    from server.agent import supplier_review
+
+    calls = []
+
+    def fake(draft, n_photos):
+        calls.append(draft)
+        return supplier_review.Review(["How many storeys is the house?"], True)
+
+    monkeypatch.setattr(supplier_review, "review_request", fake)
+    return calls
+
+
+def test_review_questions_come_before_the_contact_card(client, monkeypatch):
+    calls = gap_reviewer(monkeypatch)
+    token = refined_chat(client)
+
+    r = say(client, token, "yes").json()
+    assert "How many storeys is the house?" in r["replies"][0]
+    assert r["state"] == "collecting" and r["review_pending"] is True  # not need_details yet
+    assert len(calls) == 1
+
+    # the customer answers; the summary comes back; yes now moves on to contact details, with no second review
+    assert "Reply YES" in say(client, token, "single storey").json()["replies"][0]
+    assert say(client, token, "yes").json()["state"] == "need_details"
+    assert len(calls) == 1
+    assert contact(client, token).json()["state"] == "confirmed"
+
+
+def test_send_as_is_skips_the_review_questions_on_the_website(client, monkeypatch):
+    gap_reviewer(monkeypatch)
+    token = refined_chat(client)
+    assert say(client, token, "yes").json()["review_pending"] is True
+
+    r = say(client, token, "Send as is").json()
+    assert r["state"] == "need_details" and r["review_pending"] is False
+    final = contact(client, token).json()
+    assert final["state"] == "confirmed"
+    db = get_session()
+    try:
+        assert db.query(Job).filter_by(ref_prefix=final["job"]["ref"]).one().status == "QUEUED"
+    finally:
+        db.close()

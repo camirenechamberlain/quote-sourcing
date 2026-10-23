@@ -46,3 +46,12 @@ def user(db):
     db.add(u)
     db.commit()
     return u
+
+
+@pytest.fixture(autouse=True)
+def stub_supplier_review(monkeypatch):
+    """The real reviewer calls the Anthropic API. Tests default to 'nothing missing'; individual tests override this."""
+    from server.agent import supplier_review
+
+    monkeypatch.setattr(supplier_review, "review_request", lambda draft, n: supplier_review.Review([], True))
+    yield

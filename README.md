@@ -71,3 +71,24 @@ Limits and safety (all in `.env`, see `.env.example`):
 
 Putting it on quoteschmote.com from your own PC: use a Cloudflare Tunnel pointing at `localhost:8000`, then set
 `PUBLIC_BASE_URL=https://quoteschmote.com` and `TRUST_PROXY_HEADERS=1` in `.env` (only enable the latter behind the tunnel).
+
+### Supplier review and sourcing preferences
+
+When a customer taps "Yes, request quotes", a second agent (`server/agent/supplier_review.py`) reads the request the way a
+tradesperson would and asks only about **obvious gaps that would block a ballpark quote** (house size, wall type, etc.).
+At the same time it works out three sourcing preferences, asking only for ones the customer hasn't already stated:
+
+- **Proximity**: skipped for work that can be done remotely. Otherwise "within N km" sets the search radius (default 15 km,
+  "anywhere" = 50 km, the Places search cap).
+- **Reviews**: "4.5 stars or higher" sets `Job.min_rating`; the Discover Companies page then excludes lower-rated and unrated
+  suppliers before scraping them (`services/filters.py`).
+- **Timeframe**: when the work needs doing; it appears in the supplier email.
+
+It runs once per request, never loops, and fails open (a reviewer error never blocks a customer). Customers can reply
+"send as is" at any point to skip the questions; defaults then apply. Settings: `REVIEW_MODEL`, and `REVIEW_THOROUGH=1` to
+also ask the top nice-to-have details.
+
+### Caching
+
+Asset URLs carry a version token (`/static/chat.css?v=...`, see `server/assets.py`) and are cacheable forever, while the
+page itself is never cached. After changing Python code, restart `start_site.bat`; static file changes show immediately.

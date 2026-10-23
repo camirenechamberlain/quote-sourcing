@@ -22,6 +22,10 @@ def env_list(name: str) -> list[str]:
 
 # --- Models -----------------------------------------------------------------
 INTAKE_MODEL = env("INTAKE_MODEL", "claude-sonnet-5-5")
+# Supplier-eye review of the finished request (a judgement task, so same tier as intake).
+REVIEW_MODEL = env("REVIEW_MODEL", INTAKE_MODEL)
+# 0 = only ask what blocks a ballpark quote (default). 1 = also ask the top nice-to-have details a supplier would like.
+REVIEW_THOROUGH = env("REVIEW_THOROUGH", "0") == "1"
 
 # --- WhatsApp / Twilio ------------------------------------------------------
 TWILIO_ACCOUNT_SID = env("TWILIO_ACCOUNT_SID")

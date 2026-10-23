@@ -17,7 +17,7 @@
   </header>
 
   <main>
-    <section id="chat" class="chat">
+    <section id="chat" class="chat landing">
       <div id="log" class="log" aria-live="polite">
         <div id="hero" class="hero">
           <h1>Get quotes without the legwork</h1>
@@ -27,7 +27,6 @@
             <button type="button" class="chip-btn" data-text="I have a leaking tap that needs fixing">Fix a leaking tap</button>
             <button type="button" class="chip-btn" data-text="I need a kitchen rewired with new power points">Rewire a kitchen</button>
           </div>
-          <p class="fine">Free during beta. No sign-up needed to start.</p>
         </div>
       </div>
       <div id="quick" class="quick" hidden></div>
@@ -38,9 +37,10 @@
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
         </label>
         <input id="files" type="file" accept="image/*" multiple hidden>
-        <textarea id="text" rows="1" maxlength="2000" placeholder="Describe the job you need quoted..." aria-label="Describe the job"></textarea>
+        <textarea id="text" rows="1" maxlength="2000" placeholder="e.g. Repaint 20m of timber fence in Brunswick 3056..." aria-label="Describe the job"></textarea>
         <button class="send" type="submit" id="send-btn">Send</button>
       </form>
+      <p class="fine landing-only">Free during beta. No sign-up needed to start.</p>
     </section>
   </main>
 

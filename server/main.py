@@ -4,14 +4,14 @@ import logging
 from pathlib import Path
 
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Request, Response
-from fastapi.responses import FileResponse
+from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy.exc import IntegrityError
 
 import config
 from db.models import IntakeSession, User, WaMessage
 from db.session import get_session
-from server import web_chat, whatsapp
+from server import assets, web_chat, whatsapp
 from server.agent import intake
 from services import attachments as attachments_service
 
@@ -40,12 +40,18 @@ async def security_headers(request: Request, call_next):
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["Referrer-Policy"] = "no-referrer"  # progress links carry a secret token in the path
     response.headers["X-Frame-Options"] = "DENY"
+    if request.url.path.startswith("/static/"):
+        # Versioned URLs can be cached forever (a change means a new URL); anything else must be revalidated.
+        response.headers["Cache-Control"] = (
+            "public, max-age=31536000, immutable" if "v" in request.query_params else "no-cache"
+        )
     return response
 
 
 @app.get("/")
-def home() -> FileResponse:
-    return FileResponse(STATIC_DIR / "chat.html")
+def home() -> HTMLResponse:
+    # The page itself is never cached; the assets it references carry a version token (see server/assets.py).
+    return HTMLResponse(assets.versioned_html("chat.html"), headers={"Cache-Control": "no-cache"})
 
 
 @app.get("/healthz")

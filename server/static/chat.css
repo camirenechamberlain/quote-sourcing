@@ -152,3 +152,21 @@ input:focus, textarea:focus { outline: 2px solid var(--accent); outline-offset: 
 .chip { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
 .card { border-color: var(--line); background: var(--surface); }
 @media (min-width: 720px) { .hero h1 { font-size: 2.6rem; } }
+
+
+/* ---- Landing state: the input is the centrepiece, in the middle of the page ---- */
+.chat.landing { justify-content: center; padding: 0 16px 8vh; }
+.chat.landing .log { flex: 0 0 auto; overflow: visible; padding: 0 0 14px; }
+.chat.landing .hero { margin: 0; padding: 0; }
+.chat.landing .composer {
+  display: grid; grid-template-columns: auto 1fr auto; grid-template-areas: "text text text" "attach . send";
+  gap: 8px; padding: 12px; border: 2px solid var(--ink); border-radius: 20px; background: var(--surface);
+  box-shadow: 0 10px 30px rgba(11, 11, 15, 0.10);
+}
+.chat.landing .composer textarea { grid-area: text; min-height: 88px; border: 0; padding: 6px 4px; border-radius: 8px; }
+.chat.landing .composer textarea:focus { outline: none; }
+.chat.landing .composer .attach { grid-area: attach; }
+.chat.landing .composer .send { grid-area: send; }
+.chat.landing .previews, .chat.landing .chat-error { padding-left: 0; padding-right: 0; }
+.chat.landing .fine { margin-top: 14px; }
+.chat:not(.landing) .landing-only { display: none; }

@@ -9,6 +9,7 @@ from branding import inject_branding, brand_header
 from db.models import Company, Job
 from db.session import get_session
 from services import places_service
+from services.filters import apply_rating_filter
 from services.places_service import PlacesApiError
 from services.scraping import scrape_company_email
 
@@ -29,7 +30,12 @@ selected_label = st.selectbox("Job", list(job_labels.keys()))
 job_id = job_labels[selected_label]
 job = session.get(Job, job_id)
 
-st.caption(f"Category: **{job.category}** · Location: **{job.location_text}** · Radius: **{job.radius_m / 1000:.0f} km**")
+prefs = [f"Category: **{job.category}**", f"Location: **{job.location_text}**", f"Radius: **{job.radius_m / 1000:.0f} km**"]
+if job.min_rating:
+    prefs.append(f"Customer wants **{job.min_rating:g}★+** suppliers only")
+if job.timeframe:
+    prefs.append(f"When: **{job.timeframe}**")
+st.caption(" · ".join(prefs))
 
 col_a, col_b = st.columns(2)
 
@@ -85,6 +91,13 @@ if col_b.button("Fetch details + scrape emails", disabled=not companies):
             except Exception as e:  # noqa: BLE001
                 c.scrape_notes = f"Details fetch failed: {e}"[:200]
         session.commit()
+
+    # Honour the customer's rating preference before spending time scraping anyone.
+    skipped = apply_rating_filter(job, targets)
+    session.commit()
+    targets = [c for c in targets if c.included]
+    if skipped:
+        st.info(f"Skipped {skipped} supplier(s) below the customer's {job.min_rating:g}-star preference.")
 
     progress = st.progress(0.0, text="Scraping company websites for contact emails...")
     results = {}

@@ -19,6 +19,7 @@ from pydantic import BaseModel
 import config
 from db.models import ChatSession, Company, IntakeSession, Job, Quote, ReplyEmail, RfqSend, User, WaMessage
 from db.session import get_session
+from server import assets
 from server.agent import intake
 from services import attachments as attachments_service
 from services import images
@@ -153,7 +154,13 @@ def _state(db, user: User, request: Request) -> dict:
         if session.state == "confirmed" and session.job_id:
             j = db.get(Job, session.job_id)
             job = {"ref": j.ref_prefix, "track_url": f"{public_base(request)}/j/{j.public_token}"}
-    return {"state": state, "job": job, "needs_details": not user.mobile}
+    return {
+        "state": state,
+        "job": job,
+        "needs_details": not user.mobile,
+        # True while the supplier review has asked questions and the customer may still answer or "send as is"
+        "review_pending": intake.review_pending(session),
+    }
 
 
 def _log_message(db, user: User, direction: str, body: str, media: list[str] | None = None) -> None:
@@ -286,15 +293,27 @@ def chat_message(
             .first()
         )
 
-        wants_to_confirm = (
-            open_session is not None
-            and open_session.state == "awaiting_confirm"
-            and not files
-            and intake.normalise_command(text) in intake.YES_WORDS
-        )
+        # "Send as is" (after the supplier review asked its questions) counts as a confirmation.
+        if not files and intake.accepts_as_is(open_session, text):
+            intake.accept_as_is(open_session)
+            wants_to_confirm = True
+        else:
+            wants_to_confirm = (
+                open_session is not None
+                and open_session.state == "awaiting_confirm"
+                and not files
+                and intake.normalise_command(text) in intake.YES_WORDS
+            )
         if wants_to_confirm and not user.mobile:
-            msg = "Almost there! I just need a few contact details so I can send your progress link and sign the requests with your name."
             _log_message(db, user, "in", text)
+            # First read the request as a supplier would. If something obvious is missing, ask before asking for contact details.
+            gaps = intake.run_supplier_review(open_session)
+            if gaps:
+                for g in gaps:
+                    _log_message(db, user, "out", g)
+                db.commit()
+                return {"replies": gaps, **_state(db, user, request)}
+            msg = "Almost there! I just need a few contact details so I can send your progress link and sign the requests with your name."
             _log_message(db, user, "out", msg)
             db.commit()
             return {"replies": [msg], **_state(db, user, request), "state": "need_details"}
@@ -400,7 +419,7 @@ def progress_page(public_token: str):
         page = f"""<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1"><meta http-equiv="refresh" content="60">
 <meta name="robots" content="noindex"><title>Your quote request</title>
-<link rel="stylesheet" href="/static/chat.css"></head><body class="page">
+<link rel="stylesheet" href="{assets.asset('chat.css')}"></head><body class="page">
 <main class="card"><h1 class="brand"><span class="b1">quote</span><span class="b2">schmote</span></h1>
 <h2>{e(job.title)}</h2><p class="muted">{e(job.category)} &middot; {e(job.location_text)} &middot; ref {e(job.ref_prefix)}</p>
 {body}</main></body></html>"""

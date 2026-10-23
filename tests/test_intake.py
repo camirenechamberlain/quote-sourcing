@@ -28,6 +28,10 @@ FULL = dict(
     title="Fix leaking bathroom tap",
     description="Bathroom vanity tap dripping constantly, needs washer or cartridge.",
     location_text="Carlton VIC 3053",
+    distance_preference="local",
+    max_distance_km=10,
+    rating_preference="no_preference",
+    timeframe="ASAP",
     budget_max=300,
 )
 

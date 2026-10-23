@@ -49,6 +49,9 @@ class Job(Base):
     created_at: Mapped[datetime.datetime] = mapped_column(DateTime, default=_now)
     attachment_paths: Mapped[list] = mapped_column(JSON, default=list)
     user_id: Mapped[str | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    # Sourcing preferences gathered during the supplier review. Proximity is stored in radius_m.
+    timeframe: Mapped[str | None] = mapped_column(String, nullable=True)  # when the WORK needs doing ("ASAP", "within 2 weeks")
+    min_rating: Mapped[float | None] = mapped_column(Float, nullable=True)  # e.g. 4.5 when only top-rated suppliers wanted
     # Unguessable token for the customer-facing progress page (/j/<token>). Never the job id.
     public_token: Mapped[str | None] = mapped_column(String, unique=True, default=lambda: secrets.token_urlsafe(12))
 
