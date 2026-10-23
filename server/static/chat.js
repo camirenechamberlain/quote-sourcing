@@ -40,10 +40,18 @@
     if (last < text.length) container.appendChild(document.createTextNode(text.slice(last)));
   }
 
-  // Only follow new messages if the reader is already at (or near) the bottom, so scrolling up to re-read is never
-  // yanked away by a reply or the typing indicator. Your own messages always scroll into view.
+  // The chat follows the conversation while the reader is at (or near) the bottom ("pinned"), and stays out of the way once they
+  // scroll up to re-read. Anything that changes the layout while pinned (a new bubble, the answer buttons appearing under the
+  // chat and shrinking it, photos loading, the keyboard opening) keeps the latest message in view. Your own messages re-pin.
+  let pinned = true;
   function nearBottom() { return els.log.scrollHeight - els.log.scrollTop - els.log.clientHeight < 140; }
-  function scrollDown(force) { if (force || nearBottom()) els.log.scrollTop = els.log.scrollHeight; }
+  function toBottom() { els.log.scrollTop = els.log.scrollHeight; }
+  function scrollDown(force) { if (force) pinned = true; if (pinned) toBottom(); }
+  els.log.addEventListener("scroll", () => { pinned = nearBottom(); }, { passive: true });
+  const keepPinned = () => { if (pinned) toBottom(); };
+  els.log.addEventListener("load", keepPinned, true); // images finishing loading make their bubble taller
+  if (window.ResizeObserver) new ResizeObserver(keepPinned).observe(els.log); // the chat area shrinks when buttons/previews appear
+  if (window.MutationObserver) new MutationObserver(keepPinned).observe(els.log, { childList: true, subtree: true });
 
   function addBubble(role, text, attachments) {
     els.hero.hidden = true;
@@ -64,9 +72,9 @@
       });
       div.appendChild(wrap);
     }
-    const stick = role === "user" || nearBottom(); // measured BEFORE the new bubble makes the list taller
+    if (role === "user") pinned = true;
     els.log.appendChild(div);
-    if (stick) scrollDown(true);
+    keepPinned();
     return div;
   }
 
@@ -74,9 +82,8 @@
     let t = document.getElementById("typing");
     if (on && !t) {
       t = document.createElement("div"); t.id = "typing"; t.className = "typing"; t.textContent = "Typing...";
-      const stick = nearBottom();
       els.log.appendChild(t);
-      if (stick) scrollDown(true);
+      keepPinned();
     } else if (!on && t) { t.remove(); }
   }
 
