@@ -93,9 +93,32 @@ The same step also works out, asking only for what the customer hasn't already s
 - **Suggested attachments**: which photos or documents would help suppliers quote (for subdivisions it always leads with
   engineering/design drawings, then the title and any survey or permit). Anything already attached is not suggested again.
 
-The reply is one message in labelled sections with continuous numbering. It runs once per request, never loops, and fails open
-(a reviewer error never blocks a customer). Customers can reply "send as is" at any point to skip it; defaults then apply.
-Settings: `REVIEW_MODEL`, `REVIEW_THOROUGH`.
+**Photos first.** The first intake step only needs the trade, the job and the location (no size or scope questions). When the
+customer taps "Yes, request quotes", they are asked to attach photos *before* any question. The reviewer then studies up to
+`MAX_REVIEW_PHOTOS` (4) downscaled photos like a tradesperson on a site visit: whatever it can plainly see (existing material,
+condition, rough size where a car or door gives scale) is recorded in the brief as "seen in photos, to be confirmed on site" and
+shown to the customer, and it asks only about what the photos can't show. If the photos answer everything it asks nothing.
+"Continue without photos" falls back to the normal questions. Cost: roughly 1,000 tokens per photo on the review call (about 1
+cent for four). Turn off with `PHOTOS_FIRST=0`. Checked live on a synthetic driveway scene: 5 questions without a photo, 0 with.
+
+Questions are asked **one at a time** ("2 of 4: ..."). On the website each is a row of tappable options (multi-select where
+several can apply, with a Done button); the customer can always type instead, tap "Not sure", or "Send as is" to skip the rest.
+On WhatsApp the same options arrive as a numbered list. The review runs once per request, never loops, and fails open (a
+reviewer error never blocks a customer). Settings: `REVIEW_MODEL`, `REVIEW_THOROUGH`.
+
+#### When the customer doesn't know
+
+For a physical size or quantity the customer may not know (driveway width, house footprint, roof area), the question gets up
+to two shortcuts:
+
+- **Typical**: a sensible typical value ("about 3 m wide (single car)"). It comes free with the review, with no extra AI call,
+  and is recorded as "typical for this kind of property, not measured". Only offered for a number with a unit.
+- **Estimate from my photo**: one cheap vision call (`ESTIMATE_MODEL`, Haiku, at most 3 photos at 1024 px, about 0.03 cents).
+  The estimate must use something of known size in the photo (a car, a door) and is given as a range; if there is nothing to
+  judge scale from it says so instead of guessing. The customer confirms before it is used, and the supplier brief says
+  "estimated from photo, to be confirmed on site". At most `MAX_ESTIMATES_PER_REQUEST` (3) per request.
+
+Estimates were checked on synthetic scenes only; expect real angled photos to be rougher, which is why the customer confirms.
 
 ### Photos and PDF attachments
 

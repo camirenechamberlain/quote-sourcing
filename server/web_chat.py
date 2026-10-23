@@ -161,6 +161,8 @@ def _state(db, user: User, request: Request) -> dict:
         "needs_details": not user.mobile,
         # True while the supplier review has asked questions and the customer may still answer or "send as is"
         "review_pending": intake.review_pending(session),
+        # The open review question's tappable answers (None when no question is open); the page renders them as buttons
+        "choices": intake.current_choices(session) if session else None,
     }
 
 
@@ -252,7 +254,7 @@ def submit_contact(body: ContactBody, request: Request):
                 f"Bookmark this link to follow progress: {public_base(request)}/j/{job.public_token}"
             )
 
-        replies = intake.handle_message(db, user, "YES", [], confirm_message=confirm_text, require_name=False)
+        replies = intake.handle_message(db, user, "YES", [], confirm_message=confirm_text, require_name=False, render_options=False)
         for r in replies:
             _log_message(db, user, "out", r)
         db.commit()
@@ -308,7 +310,7 @@ def chat_message(
         if wants_to_confirm and not user.mobile:
             _log_message(db, user, "in", text)
             # First read the request as a supplier would. If something obvious is missing, ask before asking for contact details.
-            gaps = intake.run_supplier_review(open_session)
+            gaps = intake.run_supplier_review(open_session, render_options=False)
             if gaps:
                 for g in gaps:
                     _log_message(db, user, "out", g)
@@ -379,7 +381,7 @@ def chat_message(
                 f"Bookmark this link to follow progress: {public_base(request)}/j/{job.public_token}"
             )
 
-        replies = intake.handle_message(db, user, text, saved, confirm_message=confirm_text, require_name=False)
+        replies = intake.handle_message(db, user, text, saved, confirm_message=confirm_text, require_name=False, render_options=False)
         for r in replies:
             _log_message(db, user, "out", r)
         db.commit()

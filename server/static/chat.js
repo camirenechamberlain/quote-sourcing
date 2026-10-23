@@ -101,9 +101,9 @@
     });
   }
 
-  function button(label, onClick, main) {
+  function button(label, onClick, cls) {
     const b = document.createElement("button"); b.type = "button"; b.textContent = label;
-    if (main) b.className = "main";
+    if (cls) b.className = cls === true ? "main" : cls;
     b.addEventListener("click", onClick);
     return b;
   }
@@ -157,7 +157,7 @@
         if (ok) {
           form.remove();
           data.replies.forEach((r) => addBubble("bot", r));
-          applyState(data.state, data.job, data.needs_details, data.review_pending);
+          applyState(data.state, data.job, data.needs_details, data.review_pending, data.choices);
         } else if (data && data.state === "limit_reached") {
           form.remove();
           (data.replies || [data.message]).forEach((r) => addBubble("bot", r));
@@ -171,7 +171,54 @@
     });
   }
 
-  function renderQuick(state, job, reviewPending) {
+  // One review question's answers as tappable buttons, so the customer rarely has to type.
+  function renderChoices(choices) {
+    const selected = new Set();
+    let doneBtn = null;
+    if (choices.kind === "attach") {
+      const skip = choices.options[0] || "Continue without attaching";
+      els.quick.append(
+        button(choices.label === "Photos" ? "Attach photos" : "Attach files", () => els.files.click(), "main"),
+        button(skip, () => send(skip)),
+      );
+    } else {
+      choices.options.forEach((option) => {
+        if (choices.multi) {
+          const b = button(option, () => {
+            if (selected.has(option)) selected.delete(option); else selected.add(option);
+            b.setAttribute("aria-pressed", selected.has(option) ? "true" : "false");
+            if (doneBtn) doneBtn.disabled = selected.size === 0;
+          }, "choice");
+          b.setAttribute("aria-pressed", "false");
+          els.quick.append(b);
+        } else {
+          els.quick.append(button(option, () => send(option), "choice"));
+        }
+      });
+      if (choices.multi) {
+        doneBtn = button("Done", () => send(choices.options.filter((o) => selected.has(o)).join(", ")), "main");
+        doneBtn.disabled = true;
+        els.quick.append(doneBtn);
+      }
+      if (choices.kind !== "confirm") {
+        // For a customer who doesn't know: a typical value costs nothing; a photo estimate is one small call, only on tap
+        if (choices.typical) {
+          els.quick.append(button("Typical: " + choices.typical, () => send("Use typical: " + choices.typical), "assist"));
+        }
+        if (choices.photo_estimable) {
+          els.quick.append(choices.photos_attached
+            ? button("Estimate from my photo", () => send("Estimate from my photo"), "assist")
+            : button("Attach a photo to estimate", () => els.files.click(), "assist"));
+        }
+        els.quick.append(button("Not sure", () => send("Not sure"), "muted"));
+      }
+    }
+    els.quick.append(button("Send as is", () => send("SEND AS IS"), "muted"));
+    els.text.placeholder = choices.kind === "attach" ? "Or type a note..." : choices.kind === "confirm" ? "Or type the right answer..." : "Or type your own answer...";
+    els.quick.hidden = false;
+  }
+
+  function renderQuick(state, job, reviewPending, choices) {
     els.quick.textContent = "";
     els.quick.hidden = true;
     if (state === "awaiting_confirm") {
@@ -181,6 +228,8 @@
         button("Cancel", () => send("CANCEL")),
       );
       els.quick.hidden = false;
+    } else if (state === "collecting" && choices) {
+      renderChoices(choices);
     } else if (state === "collecting" && reviewPending) {
       els.quick.append(button("Send as is", () => send("SEND AS IS")));
       els.quick.hidden = false;
@@ -194,13 +243,13 @@
     }
   }
 
-  function applyState(state, job, needs, reviewPending) {
+  function applyState(state, job, needs, reviewPending, choices) {
     needsDetails = needs !== false;
     if (state === "need_details") { state = "awaiting_confirm"; renderQuick(state, job, false); showDetailsCard(); return; }
     finished = state === "confirmed" || state === "limit_reached";
     els.text.disabled = finished; els.sendBtn.disabled = finished; els.files.disabled = finished;
     els.composer.hidden = finished;
-    renderQuick(state, job, reviewPending);
+    renderQuick(state, job, reviewPending, choices);
   }
 
   // ---- Network ----
@@ -238,7 +287,7 @@
     token = saved;
     els.newChat.hidden = false;
     data.messages.forEach((m) => addBubble(m.role, m.text || (m.photos ? "(" + m.photos + " attachment" + (m.photos > 1 ? "s" : "") + ")" : "")));
-    applyState(data.state, data.job, data.needs_details, data.review_pending);
+    applyState(data.state, data.job, data.needs_details, data.review_pending, data.choices);
     scrollDown(true);
   }
 
@@ -317,7 +366,7 @@
       }
       data.replies.forEach((r) => addBubble("bot", r));
       els.text.placeholder = "Type your reply...";
-      applyState(data.state, data.job, data.needs_details, data.review_pending);
+      applyState(data.state, data.job, data.needs_details, data.review_pending, data.choices);
     } catch (e) {
       setTyping(false);
       setError("Can't reach the server. Check your connection and try again.");

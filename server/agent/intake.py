@@ -16,20 +16,30 @@ from pydantic import BaseModel
 import config
 from db.models import IntakeSession, Job, User, WaMessage
 from server.agent import supplier_review
+from server.agent.review_flow import (  # the supplier review lives in review_flow; re-exported here for callers
+    DETAILS_KEY,
+    REQUIRED_FIELDS,
+    REVIEWED_FLAG,
+    SKIP_REVIEW_WORDS,
+    accept_as_is,
+    accepts_as_is,
+    answer_current,
+    current_choices,
+    current_question,
+    normalise_command,
+    review_pending,
+    run_supplier_review,
+)
 from services import attachments as attachments_service
 
 log = logging.getLogger("intake")
 
-REQUIRED_FIELDS = ("category", "description", "location_text")
 MAX_CLARIFYING_QUESTIONS = 2  # once the required fields exist, stop interrogating the user after this many
 HISTORY_LIMIT = 10
 
 YES_WORDS = {"YES", "Y", "YEP", "YEAH", "YUP", "CONFIRM", "CONFIRMED", "GO", "OK", "OKAY", "START", "SEND IT", "GO AHEAD"}
 CANCEL_WORDS = {"CANCEL", "STOP", "ABORT", "NEVERMIND", "NEVER MIND", "FORGET IT"}
 NO_WORDS = {"NO", "NOPE", "NAH", "WAIT"}
-# After the supplier review has asked its questions, the customer may decline to answer and send anyway.
-SKIP_REVIEW_WORDS = {"SEND AS IS", "SEND IT AS IS", "AS IS", "SKIP", "SEND ANYWAY", "JUST SEND IT"}
-REVIEWED_FLAG = "_reviewed"  # stored in the draft so the review runs once per request, never in a loop
 
 FALLBACK_QUESTIONS = {
     "category": "What kind of tradesperson or service do you need (e.g. plumber, electrician, painter)?",
@@ -113,14 +123,14 @@ SYSTEM_PROMPT = """You are the intake assistant for a service that gets quotes f
 You are chatting with the user on WhatsApp.
 
 Your job: build a complete job request from what the user tells you (text, photos and documents such as drawings), merging new information into the \
-draft you are given. A request is complete when a tradesperson could give a sensible quote: what exactly needs doing and \
-roughly how big it is, where it is (suburb or postcode), and any timing or access constraints that matter.
+draft you are given. At this stage a request is complete when you know WHAT work is needed and WHERE (suburb or postcode). \
+Size, condition, scope and access are NOT your job: the customer is asked for photos next, a professional reviewer studies \
+them, and only then asks about whatever the photos don't show.
 
 Rules:
-- Ask at most ONE short, friendly question at a time, the most valuable missing one. Never list several questions.
-- Be decisive. If the request already says what the work is, roughly how big it is and where it is, it IS complete: set \
-`next_question` to null. Only ask something if a tradesperson genuinely could not give a ballpark quote without it. Do not \
-ask about details a tradesperson would check on site (exact distances, brands, pipe or cable runs).
+- Ask at most ONE short, friendly question at a time, and only for a missing essential: what the work is, or where it is. \
+Never ask about size, measurements, condition, materials, scope, access or timing, and never list several questions.
+- Be decisive. If the request says what the work is and where it is, it IS complete: set `next_question` to null.
 - Budget is optional: never insist on it. Do not ask the customer to attach photos or documents: a later step suggests exactly \
 what would help for this kind of job.
 - Do not repeat the location, budget, timing or the user's name inside `description`; those have their own fields.
@@ -187,10 +197,6 @@ def run_intake_model(draft: dict, transcript: str, user_text: str, n_photos: int
     if tool_use is None:
         raise RuntimeError("Model returned no structured output")
     return IntakeUpdate.model_validate(tool_use.input)
-
-
-def normalise_command(text: str) -> str:
-    return re.sub(r"[^A-Za-z ]", "", text or "").strip().upper()
 
 
 def _transcript(db, user: User) -> str:
@@ -262,6 +268,8 @@ def _summary(draft: dict, attachments) -> str:
     lines = ["Here's what I'll send to suppliers:", ""]
     lines.append(f"- Trade: {draft['category']}")
     lines.append(f"- Job: {draft['description']}")
+    for detail in draft.get(DETAILS_KEY) or []:  # answers to the supplier-review questions
+        lines.append(f"- {detail['label']}: {detail['answer']}")
     lines.append(f"- Location: {draft['location_text']}")
     if draft.get("budget_max"):
         low = draft.get("budget_min")
@@ -287,113 +295,6 @@ def _summary(draft: dict, attachments) -> str:
     return "\n".join(lines)
 
 
-def _public_draft(draft: dict) -> dict:
-    return {k: v for k, v in (draft or {}).items() if not k.startswith("_")}
-
-
-def accepts_as_is(session: IntakeSession | None, text: str) -> bool:
-    """True if the customer wants the request sent exactly as it is, skipping any further questions. That's clear
-    intent whether the review has asked its questions yet (collecting) or the summary is already showing."""
-    if session is None or session.state not in ("collecting", "awaiting_confirm"):
-        return False
-    draft = session.draft or {}
-    return normalise_command(text) in SKIP_REVIEW_WORDS and all(draft.get(f) for f in REQUIRED_FIELDS)
-
-
-def accept_as_is(session: IntakeSession) -> None:
-    """Move to confirmation and mark the review as done, so no further questions are asked."""
-    draft = dict(session.draft or {})
-    draft[REVIEWED_FLAG] = True
-    session.draft = draft
-    session.state = "awaiting_confirm"
-
-
-def review_pending(session: IntakeSession | None) -> bool:
-    return bool(session and session.state == "collecting" and (session.draft or {}).get(REVIEWED_FLAG))
-
-
-def run_supplier_review(session: IntakeSession, review_fn: ReviewFn | None = None) -> list[str] | None:
-    """Read the finished request as a supplier would. Returns a message asking about obvious gaps (and reopens the
-    session for answers), or None if it's fine to proceed. Runs at most once per request, and fails open: if the
-    reviewer errors, the customer is never blocked."""
-    draft = dict(session.draft or {})
-    if draft.get(REVIEWED_FLAG):
-        return None
-    draft[REVIEWED_FLAG] = True
-    session.draft = draft  # reassigned (not mutated) so SQLAlchemy sees the change
-
-    review_fn = review_fn or supplier_review.review_request  # resolved at call time so tests can patch it
-    try:
-        result = review_fn(_public_draft(draft), list(session.photo_paths or []))
-    except Exception:  # noqa: BLE001
-        log.exception("Supplier review failed; proceeding without it")
-        return None
-    if isinstance(result, supplier_review.Review):
-        gaps, needs_local = list(result.questions), result.needs_local_supplier
-        project_type_matters, suggestions = result.project_type_matters, list(result.suggested_attachments)
-    else:  # a plain list of questions (simple reviewers and tests)
-        gaps, needs_local, project_type_matters, suggestions = list(result or []), True, False, []
-
-    # Work that can be done remotely has no proximity requirement, so don't ask how close suppliers must be.
-    if not needs_local and not draft.get("distance_preference"):
-        draft["distance_preference"] = "anywhere"
-        session.draft = draft
-
-    prefs = preference_questions(draft, needs_local, project_type_matters)
-    if not gaps and not prefs and not suggestions:
-        return None
-
-    session.state = "collecting"
-    return [format_review_message(gaps, prefs, suggestions)]
-
-
-def preference_questions(draft: dict, needs_local: bool, project_type_matters: bool = False) -> list[str]:
-    """Sourcing preferences we still don't know. Anything the customer already told us is never asked again."""
-    questions: list[str] = []
-    if project_type_matters and draft.get("project_type") not in ("residential", "commercial"):
-        questions.append("Is this a residential or a commercial project? (It decides which type of supplier I look for.)")
-    if needs_local and not draft.get("distance_preference"):
-        where = draft.get("location_text") or "the job"
-        questions.append(f"How close do suppliers need to be to {where}? (for example within 10 km, or say anywhere if it doesn't matter)")
-    if not draft.get("rating_preference"):
-        questions.append("Do you only want suppliers rated 4.5 stars or higher on Google? (You'll get fewer options, but better reviewed ones.)")
-    if not draft.get("timeframe"):
-        questions.append("When does the job need to be done? (for example ASAP, within 2 weeks, or flexible)")
-    return questions
-
-
-def format_review_message(gaps: list[str], prefs: list[str], suggestions: list[str] | None = None) -> str:
-    suggestions = suggestions or []
-    parts: list[str] = []
-    number = 0
-
-    def numbered(items: list[str]) -> str:
-        nonlocal number
-        lines = []
-        for item in items:
-            number += 1
-            lines.append(f"{number}. {item}")
-        return "\n".join(lines)
-
-    # Three labelled sections, numbered continuously so the customer can answer "1: ..., 4: ..." easily.
-    if gaps:
-        parts.append("Before I send this out, here's what a supplier would want to know:")
-        parts.append(numbered(gaps))
-    if prefs:
-        parts.append("To find the right suppliers:" if gaps else "Before I send this out, a few quick things to find the right suppliers:")
-        parts.append(numbered(prefs))
-    if suggestions:
-        parts.append(
-            "It would also help suppliers quote accurately if you can attach:"
-            if (gaps or prefs)
-            else "Before I send this out: suppliers will quote more accurately if you can attach:"
-        )
-        parts.append("\n".join(f"- {s}" for s in suggestions))
-    how = "Reply with whatever you know" + (", attach files with the paperclip," if suggestions else ",")
-    parts.append(f"{how} or reply SEND AS IS to go ahead anyway.")
-    return "\n\n".join(parts)
-
-
 def _active_session(db, user: User) -> IntakeSession | None:
     return (
         db.query(IntakeSession)
@@ -405,9 +306,13 @@ def _active_session(db, user: User) -> IntakeSession | None:
 
 def _create_job(db, user: User, session: IntakeSession) -> Job:
     draft = session.draft
+    description = draft["description"]
+    details = draft.get(DETAILS_KEY) or []
+    if details:  # what the customer told us in answer to the supplier-review questions goes to suppliers too
+        description += "\n\nAdditional details:\n" + "\n".join(f"- {d['label']}: {d['answer']}" for d in details)
     job = Job(
         title=draft.get("title") or f"{draft['category']} job",
-        description=draft["description"],
+        description=description,
         category=draft["category"],
         location_text=draft["location_text"],
         budget_min=draft.get("budget_min"),
@@ -446,11 +351,14 @@ def handle_message(
     confirm_message: Callable[[Job], str] | None = None,
     require_name: bool = True,
     review_fn: ReviewFn | None = None,
+    render_options: bool = True,
+    estimate_fn=None,
 ) -> list[str]:
     """Process one inbound user message. Returns the replies to send back. Caller commits `db`.
 
     `require_name=False` is used by the website chat, which collects the first name together with the
     mobile and email *after* the request is refined, instead of asking for it mid-conversation.
+    `render_options=False` is also website-only: answer options are shown as buttons, not as a numbered list in the text.
     """
     model_fn = model_fn or run_intake_model  # resolved at call time so tests can patch it
     text = (text or "").strip()
@@ -469,9 +377,9 @@ def handle_message(
 
     if session and session.state == "awaiting_confirm" and not media_paths:
         if command in YES_WORDS:
-            gaps = run_supplier_review(session, review_fn)
-            if gaps:
-                return gaps
+            first_question = run_supplier_review(session, review_fn, render_options)
+            if first_question:
+                return first_question
             job = _create_job(db, user, session)
             if confirm_message:
                 return [confirm_message(job)]
@@ -487,6 +395,16 @@ def handle_message(
         session = IntakeSession(user_id=user.id, draft={}, photo_paths=[])
         db.add(session)
         db.flush()
+
+    # The supplier review is asking its questions one at a time: this message is the answer (or a file, or "send as is").
+    if session.state == "collecting" and current_question(session):
+        if media_paths:
+            session.photo_paths = list(session.photo_paths or []) + media_paths
+        replies, finished = answer_current(session, text, media_paths, render_options, estimate_fn, review_fn)
+        if finished:
+            session.state = "awaiting_confirm"
+            return [_summary(session.draft, session.photo_paths)]
+        return replies
 
     # A bare YES while we're still asking optional questions means "that's enough": show the summary.
     # (Starting outreach still needs another explicit YES to the summary, so this can't start anything.)

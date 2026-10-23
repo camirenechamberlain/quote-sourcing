@@ -49,6 +49,15 @@ def user(db):
 
 
 @pytest.fixture(autouse=True)
+def photos_first_off_by_default(monkeypatch):
+    """Most tests exercise the questions themselves, so they skip the ask-for-photos step. test_photos_first.py turns it on."""
+    import config
+
+    monkeypatch.setattr(config, "PHOTOS_FIRST", False)
+    yield
+
+
+@pytest.fixture(autouse=True)
 def stub_supplier_review(monkeypatch):
     """The real reviewer calls the Anthropic API. Tests default to 'nothing missing'; individual tests override this."""
     from server.agent import supplier_review

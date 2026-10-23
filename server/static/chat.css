@@ -192,3 +192,13 @@ main { max-width: none; }
 .chat.landing { padding-left: max(16px, calc((100% - 720px) / 2)); padding-right: max(16px, calc((100% - 720px) / 2)); }
 .chat.landing .log, .chat.landing .composer, .chat.landing .quick, .chat.landing .previews, .chat.landing .chat-error { padding-left: 0; padding-right: 0; }
 .chat.landing .composer { padding: 12px; }
+
+
+/* ---- Review answers as tappable choices ---- */
+.quick button.choice { border: 1.5px solid var(--ink); color: var(--ink); background: var(--surface); }
+.quick button.choice:active { background: var(--ink); color: #fff; }
+.quick button.choice[aria-pressed="true"] { background: var(--ink); color: #fff; }
+.quick button.muted { border: 1.5px solid var(--line); color: var(--muted); background: transparent; font-weight: 500; }
+.quick button.main:disabled { opacity: 0.4; }
+
+.quick button.assist { border: 1.5px dashed var(--accent); color: var(--accent); background: var(--accent-soft); font-weight: 600; }
