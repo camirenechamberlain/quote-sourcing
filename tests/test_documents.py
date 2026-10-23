@@ -138,11 +138,12 @@ def test_pdf_upload_is_accepted_cleaned_and_reaches_the_job(client):
         db.close()
 
 
-def test_summary_counts_photos_and_documents_separately(client):
+def test_summary_names_every_attachment_exactly_as_suppliers_will_see_it(client):
     token = start(client).json()["token"]
     files = [("files", ("a.jpg", jpeg_bytes(), "image/jpeg")), pdf_part()]
     reply = say(client, token, "plumber for a leaking tap in carlton", files=files).json()["replies"][0]
-    assert "Attachments: 1 photo, 1 document" in reply
+    assert "Attachments (sent to every supplier):" in reply
+    assert "• photo-1.jpg" in reply and "• Structural Drawings.pdf" in reply  # no storage prefix, photos numbered
 
 
 def test_a_pdf_with_the_wrong_name_or_type_is_still_judged_by_content(client):
@@ -209,3 +210,11 @@ def test_display_name_rules():
     assert display_name(Path("deadbeef_Plans Rev C.pdf"), 1) == "Plans Rev C.pdf"
     assert display_name(Path("Plans.pdf"), 1) == "Plans.pdf"  # no storage prefix: left alone
     assert display_name(Path("abcdef123456.jpg"), 3) == "photo-3.jpg"
+
+
+def test_supplier_file_names_number_the_photos_and_keep_document_names_in_send_order():
+    from services.attachments import supplier_file_names
+
+    paths = ["/x/abcdef123456.jpg", "/x/deadbeef_Plans Rev C.pdf", "/x/0123456789ab.jpg"]
+    assert supplier_file_names(paths) == ["photo-1.jpg", "Plans Rev C.pdf", "photo-2.jpg"]
+    assert supplier_file_names([]) == [] and supplier_file_names(None) == []

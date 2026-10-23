@@ -396,7 +396,7 @@ def test_attaching_a_file_completes_the_attachment_step(db, user, tmp_path):
     drawing = tmp_path / "ab12cd34_Subdivision Drawings.pdf"
     drawing.write_bytes(b"%PDF-1.4 stub")
     summary = say(db, user, "", reviewer, media_paths=[str(drawing)])[0]
-    assert "Attachments: 1 document" in summary
+    assert "• Subdivision Drawings.pdf" in summary
     assert "Confirmed" in say(db, user, "yes", reviewer)[0]
     assert reviewer.calls == 1
 

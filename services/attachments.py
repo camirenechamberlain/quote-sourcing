@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import uuid
 from pathlib import Path
 
@@ -36,3 +37,25 @@ def delete_attachment(path_str: str) -> None:
 
 def total_size(paths: list[str]) -> int:
     return sum(Path(p).stat().st_size for p in paths if Path(p).exists())
+
+
+_STORAGE_PREFIX = re.compile(r"^[0-9a-f]{6,12}_(?=.)")
+
+
+def display_name(path: Path, photo_number: int) -> str:
+    """The file name a supplier sees. We store files with a random prefix; strip it, and give anonymous photos a
+    readable name (photo-1.jpg) instead of random hex. Documents keep the customer's own name for them."""
+    if path.suffix.lower() == ".pdf":
+        return _STORAGE_PREFIX.sub("", path.name)
+    return f"photo-{photo_number}{path.suffix.lower() or '.jpg'}"
+
+
+def supplier_file_names(paths) -> list[str]:
+    """The names suppliers will see for these files, in the order they are sent (photos numbered, documents as named)."""
+    names, photo_number = [], 0
+    for raw in paths or []:
+        path = Path(str(raw))
+        if path.suffix.lower() != ".pdf":
+            photo_number += 1
+        names.append(display_name(path, photo_number))
+    return names

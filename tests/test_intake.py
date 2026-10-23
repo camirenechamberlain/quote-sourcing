@@ -57,7 +57,7 @@ def test_complete_request_goes_to_the_summary_then_confirms_then_creates_job(db,
     fake = scripted(IntakeUpdate(**FULL, next_question=None))
     replies = handle_message(db, user, "plumber carlton leaking tap max $300", [str(photo)], model_fn=fake)
     assert "Reply YES to start" in replies[0]
-    assert "Attachments: 1 photo" in replies[0]
+    assert "Attachments (sent to every supplier):" in replies[0] and "• photo-1.jpg" in replies[0]
     assert "up to $300" in replies[0]
     record_out(db, user, replies)
 

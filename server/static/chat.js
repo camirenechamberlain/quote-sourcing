@@ -336,6 +336,10 @@
       }
     }
     renderPreviews();
+    // Once the chat is under way, choosing photos IS the message: send them straight away. On the landing page, and when the
+    // customer has typed a caption, wait for them to press Send so the description and photos go together.
+    const chatStarted = !els.chat.classList.contains("landing");
+    if (chatStarted && pending.length > 0 && !els.text.value.trim()) send();
   });
 
   // ---- Sending ----

@@ -123,7 +123,9 @@ Estimates were checked on synthetic scenes only; expect real angled photos to be
 
 ### Photos and PDF attachments
 
-Customers can attach photos and PDFs (for example engineering drawings): up to 6 files per message, 12 per request, 4 PDFs,
+Once the chat is under way, choosing photos sends them straight away (on the landing page they wait for the job description, and
+they wait if the customer has typed a caption). The summary lists every attached file by name, exactly as suppliers will see it
+(`photo-1.jpg`, `Site Plan Rev B.pdf`). Customers can attach photos and PDFs (for example engineering drawings): up to 6 files per message, 12 per request, 4 PDFs,
 10 MB per PDF, 15 MB in total. File type is decided by content, never by name. Photos are re-encoded (GPS/EXIF stripped).
 PDFs are rebuilt page by page (`services/documents.py`), which drops JavaScript, embedded files, form scripts, annotation
 actions and document metadata while keeping the pages vector-sharp; encrypted, oversized or unreadable PDFs are rejected with a

@@ -3,7 +3,6 @@ from __future__ import annotations
 import base64
 import datetime
 import mimetypes
-import re
 from email import encoders
 from email.header import Header
 from email.mime.base import MIMEBase
@@ -15,6 +14,7 @@ from pathlib import Path
 from bs4 import BeautifulSoup
 from googleapiclient.discovery import build
 
+from services.attachments import display_name  # noqa: F401 (also imported from here by tests)
 from services.google_oauth import get_credentials
 
 
@@ -27,17 +27,6 @@ def _service():
     if not creds or not creds.valid:
         raise GmailNotConnected("Gmail is not connected. Go to Settings and click 'Connect Gmail'.")
     return build("gmail", "v1", credentials=creds)
-
-
-_STORAGE_PREFIX = re.compile(r"^[0-9a-f]{6,12}_(?=.)")
-
-
-def display_name(path: Path, photo_number: int) -> str:
-    """The file name a supplier sees. We store files with a random prefix; strip it, and give anonymous photos a
-    readable name (photo-1.jpg) instead of random hex. Documents keep the customer's own name for them."""
-    if path.suffix.lower() == ".pdf":
-        return _STORAGE_PREFIX.sub("", path.name)
-    return f"photo-{photo_number}{path.suffix.lower() or '.jpg'}"
 
 
 def _attach_file(message: MIMEMultipart, path: Path, photo_number: int = 1) -> None:

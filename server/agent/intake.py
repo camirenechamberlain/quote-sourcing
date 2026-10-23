@@ -241,17 +241,6 @@ def _merge(draft: dict, update: IntakeUpdate) -> dict:
     return merged
 
 
-def describe_attachments(paths) -> str:
-    docs = sum(1 for p in paths or [] if str(p).lower().endswith(".pdf"))
-    photos = len(paths or []) - docs
-    parts = []
-    if photos:
-        parts.append(f"{photos} photo{'s' if photos != 1 else ''}")
-    if docs:
-        parts.append(f"{docs} document{'s' if docs != 1 else ''}")
-    return ", ".join(parts) or "none"
-
-
 def _summary(draft: dict, attachments) -> str:
     lines = ["Here's what I'll send to suppliers:", ""]
     lines.append(f"- Trade: {draft['category']}")
@@ -278,7 +267,12 @@ def _summary(draft: dict, attachments) -> str:
         lines.append(f"- Reviews: {TOP_RATED:g} stars or higher")
     elif draft.get("rating_preference") == "no_preference":
         lines.append("- Reviews: any rating")
-    lines.append(f"- Attachments: {describe_attachments(attachments)}")
+    names = attachments_service.supplier_file_names(attachments)
+    if names:  # name each file: this is exactly what every supplier will receive with the request
+        lines.append("- Attachments (sent to every supplier):")
+        lines += [f"   • {name}" for name in names]
+    else:
+        lines.append("- Attachments: none")
     lines += ["", "Reply YES to start, or tell me what to change. Reply CANCEL to drop it."]
     return "\n".join(lines)
 
