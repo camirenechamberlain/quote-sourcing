@@ -316,7 +316,7 @@ def chat_message(
                     _log_message(db, user, "out", g)
                 db.commit()
                 return {"replies": gaps, **_state(db, user, request)}
-            msg = "Almost there! I just need a few contact details so I can send your progress link and sign the requests with your name."
+            msg = "That's everything I need about the job. Last step: a few contact details."
             _log_message(db, user, "out", msg)
             db.commit()
             return {"replies": [msg], **_state(db, user, request), "state": "need_details"}

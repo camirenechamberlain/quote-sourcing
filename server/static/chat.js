@@ -134,7 +134,7 @@
     form.id = "details-form"; form.className = "bubble bot details"; form.noValidate = true;
 
     const intro = document.createElement("p");
-    intro.textContent = "Almost there! Who should I sign the requests as, and where can I send your progress link?";
+    intro.textContent = "Who should I sign the requests as, and where can I send your progress link?";
     const name = field("First name", "details-name", "text", { autocomplete: "given-name", placeholder: "Irene", maxlength: "40" });
     const mobile = field("Mobile number", "details-mobile", "tel", { inputmode: "tel", autocomplete: "tel", placeholder: "0412 345 678" });
     const email = field("Email", "details-email", "email", { autocomplete: "email", placeholder: "you@example.com" });

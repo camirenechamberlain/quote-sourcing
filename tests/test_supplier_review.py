@@ -529,3 +529,11 @@ def test_supplier_email_is_written_on_behalf_of_the_customer_and_says_so():
     assert "I'm writing on behalf of Irene to request a quote" in body
     assert body.rstrip().endswith("Quoteschmote, on behalf of Irene")  # the sender is honest about who is writing
     assert "My name is" not in body and "ABC-123" in body
+
+
+def test_supplier_email_lists_the_attachments_above_the_sign_off():
+    acme = SimpleNamespace(name="Acme Concreting")
+    body = build_body(email_job(), acme, "ABC-123", "Irene", ["photo-1.jpg", "Site Plan Rev B.pdf"])
+    assert "Attached for reference: photo-1.jpg, Site Plan Rev B.pdf" in body
+    assert body.index("Attached for reference") < body.index("Thanks very much")
+    assert "Attached for reference" not in build_body(email_job(), acme, "ABC-123", "Irene")

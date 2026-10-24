@@ -114,10 +114,7 @@ if "rfq_drafts" not in st.session_state or st.session_state.get("rfq_drafts_job"
     for c in companies:
         if c.id in already_sent_ids:
             continue
-        ref, subject, body = build_rfq(job, c, sender_name)
-        if job.attachment_paths:
-            names = attachments_service.supplier_file_names(job.attachment_paths)
-            body += "\nAttached for reference: " + ", ".join(names) + "\n"
+        ref, subject, body = build_rfq(job, c, sender_name, attachments_service.supplier_file_names(job.attachment_paths))
         st.session_state.rfq_drafts[c.id] = {
             "select": True,
             "email": c.discovered_email,
