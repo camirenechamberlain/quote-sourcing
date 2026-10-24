@@ -521,3 +521,11 @@ def test_unsure_replies_are_recognised(text):
 @pytest.mark.parametrize("text", ["Peeling or flaking", "Yes", "No", "about 120 square metres", "Within 10 km", "I know the roof is tiled"])
 def test_real_answers_are_not_mistaken_for_unsure(text):
     assert not review_flow.is_unsure(text)
+
+
+def test_supplier_email_is_written_on_behalf_of_the_customer_and_says_so():
+    acme = SimpleNamespace(name="Acme Painting")
+    body = build_body(email_job(), acme, "ABC-123", "Irene")
+    assert "I'm writing on behalf of Irene to request a quote" in body
+    assert body.rstrip().endswith("Quoteschmote, on behalf of Irene")  # the sender is honest about who is writing
+    assert "My name is" not in body and "ABC-123" in body

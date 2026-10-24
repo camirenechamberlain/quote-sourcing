@@ -27,7 +27,7 @@ def build_body(job: Job, company: Company, reference_code: str, sender_name: str
     deadline_line = f"\nWe'd appreciate a reply by {job.deadline}." if job.deadline else ""
     return f"""Hi {company.name} team,
 
-My name is {sender_name}. I'm requesting a quote for the following job in {job.location_text}:
+I'm writing on behalf of {sender_name} to request a quote for the following job in {job.location_text}:
 
 {job.description}
 
@@ -41,10 +41,10 @@ Could you please reply with:
 - Estimated timeline to complete the work
 - Any warranty or guarantee on the work
 
-Please keep this reference code in your reply so I can match it up: {reference_code}
+Please keep this reference code in your reply so we can match it up: {reference_code}
 
 Thanks very much,
-{sender_name}
+Quoteschmote, on behalf of {sender_name}
 """
 
 

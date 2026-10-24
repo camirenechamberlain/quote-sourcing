@@ -95,6 +95,7 @@ class RfqSend(Base):
     gmail_message_id: Mapped[str | None] = mapped_column(String, nullable=True)
     gmail_thread_id: Mapped[str | None] = mapped_column(String, nullable=True)
     status: Mapped[str] = mapped_column(String, default="draft")  # draft|sent|failed
+    test_mode: Mapped[bool] = mapped_column(Boolean, default=False)  # sent to the TEST_RECIPIENT, not the supplier
     sent_at: Mapped[datetime.datetime | None] = mapped_column(DateTime, nullable=True)
     error_message: Mapped[str | None] = mapped_column(String, nullable=True)
 

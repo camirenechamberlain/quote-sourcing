@@ -48,4 +48,6 @@ GLOBAL_DAILY_MESSAGES = int(env("GLOBAL_DAILY_MESSAGES", "1500"))
 
 # --- Safety -----------------------------------------------------------------
 # dry_run: nothing is sent to anyone (messages are only recorded). live: real sends.
-OUTBOUND_MODE = env("OUTBOUND_MODE", "dry_run")
+OUTBOUND_MODE = env("OUTBOUND_MODE", "dry_run")  # dry_run | test | live (anything else is treated as dry_run)
+# In test mode every RFQ is redirected to this address (your own inbox) instead of the supplier.
+TEST_RECIPIENT = env("TEST_RECIPIENT", "")
