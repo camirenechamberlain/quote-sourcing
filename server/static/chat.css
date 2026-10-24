@@ -163,7 +163,7 @@ input:focus, textarea:focus { outline: 2px solid var(--accent); outline-offset: 
   gap: 8px; padding: 12px; border: 2px solid var(--ink); border-radius: 20px; background: var(--surface);
   box-shadow: 0 10px 30px rgba(11, 11, 15, 0.10);
 }
-.chat.landing .composer textarea { grid-area: text; min-height: 88px; border: 0; padding: 6px 4px; border-radius: 8px; }
+.chat.landing .composer textarea { grid-area: text; min-height: 116px; border: 0; padding: 6px 4px; border-radius: 8px; }
 .chat.landing .composer textarea:focus { outline: none; }
 .chat.landing .composer .attach { grid-area: attach; }
 .chat.landing .composer .send { grid-area: send; }

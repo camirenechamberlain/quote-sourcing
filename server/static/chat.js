@@ -273,7 +273,7 @@
     els.hero.hidden = false; els.chat.classList.add("landing");
     els.quick.hidden = true; els.previews.hidden = true; setError("");
     els.composer.hidden = false; els.text.disabled = false; els.sendBtn.disabled = false; els.files.disabled = false;
-    els.text.value = ""; els.text.style.height = "auto"; els.text.placeholder = "e.g. Repaint 20m of timber fence in Brunswick 3056...";
+    els.text.value = ""; els.text.style.height = "auto"; els.text.placeholder = "Describe your job in a few words and add photos or drawings. We read your photos to fill in the details, so you answer fewer questions.";
     els.newChat.hidden = true;
   }
 
