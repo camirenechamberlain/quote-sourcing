@@ -44,9 +44,11 @@ def _attach_file(message: MIMEMultipart, path: Path, photo_number: int = 1) -> N
     message.attach(part)
 
 
-def build_mime_message(to: str, subject: str, body: str, attachment_paths: list[str] | None = None):
+def build_mime_message(to: str, subject: str, body: str, attachment_paths: list[str] | None = None,
+                       extra_files: list[tuple[str, str, bytes]] | None = None):
+    """`extra_files` are (filename, mime type, bytes) attachments built in memory, such as a calendar invite."""
     valid_attachments = [Path(p) for p in (attachment_paths or []) if Path(p).exists()]
-    if valid_attachments:
+    if valid_attachments or extra_files:
         message = MIMEMultipart()
         message.attach(MIMEText(body, _charset="utf-8"))
         photo_number = 0
@@ -54,6 +56,13 @@ def build_mime_message(to: str, subject: str, body: str, attachment_paths: list[
             if path.suffix.lower() != ".pdf":
                 photo_number += 1
             _attach_file(message, path, photo_number)
+        for filename, mime_type, data in extra_files or []:
+            maintype, _, subtype = mime_type.partition("/")
+            part = MIMEBase(maintype, subtype)
+            part.set_payload(data)
+            encoders.encode_base64(part)
+            part.add_header("Content-Disposition", "attachment", filename=filename)
+            message.attach(part)
     else:
         message = MIMEText(body, _charset="utf-8")
 
@@ -62,10 +71,11 @@ def build_mime_message(to: str, subject: str, body: str, attachment_paths: list[
     return message
 
 
-def send_email(to: str, subject: str, body: str, attachment_paths: list[str] | None = None) -> tuple[str, str]:
+def send_email(to: str, subject: str, body: str, attachment_paths: list[str] | None = None,
+               extra_files: list[tuple[str, str, bytes]] | None = None) -> tuple[str, str]:
     """Sends a plain-text email, optionally with file attachments. Returns (message_id, thread_id)."""
     service = _service()
-    message = build_mime_message(to, subject, body, attachment_paths)
+    message = build_mime_message(to, subject, body, attachment_paths, extra_files)
     raw = base64.urlsafe_b64encode(message.as_bytes()).decode()
     sent = service.users().messages().send(userId="me", body={"raw": raw}).execute()
     return sent["id"], sent["threadId"]

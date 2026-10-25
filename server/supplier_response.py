@@ -12,14 +12,16 @@ import html
 import re
 
 from fastapi import APIRouter, Form, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, Response
 
-from db.models import Company, Job, Quote, ReplyEmail, RfqSend, User
+from db.models import Company, Job, Quote, ReplyEmail, RfqSend, User, Visit
 from db.session import get_session
 from server import assets
 from server.web_chat import SlidingWindow, client_ip
 from services import attachments as attachments_service
-from services.quote_format import describe_price
+from services import timeutil
+from services.quote_format import describe_price, window_labels
+from services.visit_messages import visit_invite
 
 router = APIRouter()
 
@@ -79,7 +81,7 @@ def _existing(db, rfq: RfqSend) -> Quote | None:
 
 def save_response(db, rfq: RfqSend, job: Job, company: Company, *, kind: str, price_type: str = "unknown",
                   price: float | None = None, price_max: float | None = None, included: str = "", excluded: str = "",
-                  timeline: str = "", warranty: str = "", notes: str = "", visit_windows: list[str] | None = None,
+                  timeline: str = "", warranty: str = "", notes: str = "", visit_windows: list[dict] | None = None,
                   decline_reason: str | None = None) -> Quote:
     """Store (or replace) the supplier's web response as a ReplyEmail + Quote, so the rest of the app treats it like an email reply."""
     visit_windows = visit_windows or []
@@ -87,7 +89,7 @@ def save_response(db, rfq: RfqSend, job: Job, company: Company, *, kind: str, pr
     if kind == "quote":
         summary = f"Quote: {price_text}" + (f". {notes}" if notes else "")
     elif kind == "visit":
-        summary = "Wants to see the job first. Could visit: " + "; ".join(visit_windows) + (f". {notes}" if notes else "")
+        summary = "Wants to see the job first. Could visit: " + "; ".join(window_labels(visit_windows)) + (f". {notes}" if notes else "")
     else:
         summary = f"Declined: {DECLINE_REASONS.get(decline_reason or 'other', 'Another reason')}" + (f". {notes}" if notes else "")
     body_lines = [f"[Response from the supplier page] {summary}"]
@@ -122,6 +124,7 @@ def save_response(db, rfq: RfqSend, job: Job, company: Company, *, kind: str, pr
     quote.summary = summary[:500]
     quote.decline_reason = decline_reason if kind == "decline" else None
     quote.visit_windows = visit_windows if kind == "visit" else []
+    quote.windows_declined = False  # a fresh response clears any earlier "those times don't suit"
     quote.llm_raw_response = None
     db.commit()
     return quote
@@ -171,6 +174,18 @@ def _landing(db, token: str, rfq: RfqSend, job: Job, company: Company, saved: bo
     if existing:
         title = "Thanks, your response is with the customer." if saved else "You've already responded."
         banner = f"<div class='notice'><b>{title}</b><br>{e(existing.summary or '')}<br><span class='muted'>You can change it below.</span></div>"
+    visit = db.query(Visit).filter_by(rfq_send_id=rfq.id, status="confirmed").order_by(Visit.created_at.desc()).first()
+    if visit:  # the customer has confirmed a time: this is the one place the supplier sees the customer's contact details
+        customer = db.get(User, job.user_id) if job.user_id else None
+        who = e(customer.name) if customer and customer.name else "The customer"
+        banner = (f"<div class='notice ok'><b>Site visit confirmed: {e(visit.label)}</b><br>{who}"
+                  + (f" &middot; <a href='tel:{e(customer.mobile)}'>{e(customer.mobile)}</a>" if customer and customer.mobile else "")
+                  + (f" &middot; {e(customer.email)}" if customer and customer.email else "")
+                  + f"<br>{e(job.location_text)}<br><a href='/q/{token}/visit.ics'>Add to calendar</a><br>"
+                  "<span class='muted'>After the visit, send your quote below so it reaches the customer straight away.</span></div>") + banner
+    elif existing and existing.kind == "visit" and existing.windows_declined:
+        banner = ("<div class='notice'><b>The customer can't make those times.</b><br>Please offer a couple of other times "
+                  f"below.</div>") + banner
     ask = "<p><b>Change your response</b></p>" if existing else "<p><b>How would you like to respond?</b></p>"
     foot = "<p class='fine'>Prefer email? Just reply to the email you received. That works too. No account needed.</p>"
     return _page("Quote request", f"{banner}{_brief(db, job, rfq)}{ask}{_actions(token)}{foot}")
@@ -210,17 +225,59 @@ def _quote_form(token: str, values: dict, error: str = "") -> str:
     )
 
 
+def _slot_row(i: int, values: dict, today: str) -> str:
+    return (
+        f'<div class="slot"><span class="label">Option {i}{" (optional)" if i > 1 else ""}</span>'
+        f'<input type="date" name="date{i}" value="{e(values.get(f"date{i}", ""))}" min="{today}" aria-label="Date for option {i}">'
+        f'<div class="times"><input type="time" name="from{i}" value="{e(values.get(f"from{i}", ""))}" aria-label="From">'
+        f'<span>to</span><input type="time" name="to{i}" value="{e(values.get(f"to{i}", ""))}" aria-label="To"></div></div>'
+    )
+
+
 def _visit_form(token: str, values: dict, error: str = "") -> str:
     err = f"<p class='error' role='alert'>{e(error)}</p>" if error else ""
+    today = timeutil.local_now().strftime("%Y-%m-%d")
     return (
-        f"{_back(token)}<h2>Arrange a site visit</h2><p class='muted'>Offer up to three times. The customer picks one, and "
-        "shares their contact details with you only once they've approved a visit.</p>"
+        f"{_back(token)}<h2>Arrange a site visit</h2><p class='muted'>Offer up to three times (a window is fine, such as 10am to "
+        "12pm). The customer picks one, and shares their contact details with you only once they've confirmed.</p>"
         f"{err}<form method='post' action='/q/{token}/visit'>"
-        + _field("When could you visit? (one per line)", "windows", values.get("windows", ""), textarea=True, placeholder="Tue 10am to 12pm\nThu after 2pm")
+        + "".join(_slot_row(i, values, today) for i in (1, 2, 3))
         + _field("Ballpark price, if you can (optional, $)", "price", values.get("price", ""), placeholder="e.g. 4,000 to 6,000")
         + _field("Anything the customer should prepare (optional)", "notes", values.get("notes", ""), textarea=True)
-        + "<button class='btn primary' type='submit'>Request a visit</button></form>"
+        + "<button class='btn primary' type='submit'>Offer these times</button></form>"
     )
+
+
+def parse_slots(form: dict) -> tuple[list[dict], str]:
+    """Up to three (date, from, to) rows -> [{start, end, label}] in local time, or ([], message) if something is wrong."""
+    now = timeutil.local_now()
+    windows: list[dict] = []
+    seen: set = set()
+    for i in (1, 2, 3):
+        day, begin, finish = ((form.get(f"{k}{i}") or "").strip() for k in ("date", "from", "to"))
+        if not (day or begin or finish):
+            continue
+        if not (day and begin and finish):
+            return [], f"Option {i} needs a date and both times."
+        try:
+            start = datetime.datetime.strptime(f"{day}T{begin[:5]}", "%Y-%m-%dT%H:%M")
+            end = datetime.datetime.strptime(f"{day}T{finish[:5]}", "%Y-%m-%dT%H:%M")
+        except ValueError:
+            return [], f"Option {i} doesn't look like a valid date and time."
+        if end <= start:
+            return [], f"Option {i}: the end time must be after the start time."
+        if end - start > datetime.timedelta(hours=12):
+            return [], f"Option {i}: a window can be at most 12 hours."
+        if start < now:
+            return [], f"Option {i} is in the past."
+        if start > now + datetime.timedelta(days=90):
+            return [], f"Option {i} is more than 90 days away."
+        if (start, end) not in seen:
+            seen.add((start, end))
+            windows.append({"start": timeutil.iso(start), "end": timeutil.iso(end), "label": timeutil.label(start, end)})
+    if not windows:
+        return [], "Please offer at least one time you could visit."
+    return windows, ""
 
 
 def _decline_form(token: str, values: dict, error: str = "") -> str:
@@ -319,21 +376,41 @@ def visit_form(request: Request, token: str):
 
 
 @router.post("/q/{token}/visit", response_class=HTMLResponse)
-def visit_submit(request: Request, token: str, windows: str = Form(""), price: str = Form(""), notes: str = Form("")):
+def visit_submit(request: Request, token: str, date1: str = Form(""), from1: str = Form(""), to1: str = Form(""),
+                 date2: str = Form(""), from2: str = Form(""), to2: str = Form(""), date3: str = Form(""), from3: str = Form(""),
+                 to3: str = Form(""), price: str = Form(""), notes: str = Form("")):
     gate = _gate(request, token, submitting=True)
     if isinstance(gate, HTMLResponse):
         return gate
     db, (rfq, job, company) = gate
     try:
-        offered = lines(windows)[:3]
-        values = {"windows": windows, "price": price, "notes": notes}
-        if not offered:
-            return _page("Arrange a site visit", _visit_form(token, values, "Please offer at least one time you could visit."), 400)
+        values = {"date1": date1, "from1": from1, "to1": to1, "date2": date2, "from2": from2, "to2": to2, "date3": date3,
+                  "from3": from3, "to3": to3, "price": price, "notes": notes}
+        windows, error = parse_slots(values)
+        if error:
+            return _page("Arrange a site visit", _visit_form(token, values, error), 400)
         ballpark = clean_text(price, 60)
-        extra = clean_text(notes)
-        save_response(db, rfq, job, company, kind="visit", visit_windows=offered,
-                      notes=(f"Ballpark: {ballpark}. " if ballpark else "") + extra)
+        save_response(db, rfq, job, company, kind="visit", visit_windows=windows,
+                      notes=(f"Ballpark: {ballpark}. " if ballpark else "") + clean_text(notes))
         return RedirectResponse(f"/q/{token}?saved=1", status_code=303)
+    finally:
+        db.close()
+
+
+@router.get("/q/{token}/visit.ics")
+def visit_ics(request: Request, token: str):
+    """Calendar file for the confirmed visit, for the supplier (the link in their email is their only credential)."""
+    gate = _gate(request, token)
+    if isinstance(gate, HTMLResponse):
+        return gate
+    db, (rfq, job, company) = gate
+    try:
+        visit = db.query(Visit).filter_by(rfq_send_id=rfq.id, status="confirmed").order_by(Visit.created_at.desc()).first()
+        if visit is None:
+            return _not_found()
+        customer = db.get(User, job.user_id) if job.user_id else None
+        name, mime, data = visit_invite(visit, job, company, for_supplier=True, customer_first_name=customer.name if customer else None)
+        return Response(data, media_type="text/calendar", headers={"Content-Disposition": f'attachment; filename="{name}"', "Cache-Control": "no-store"})
     finally:
         db.close()
 

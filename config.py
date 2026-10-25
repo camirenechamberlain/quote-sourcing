@@ -33,6 +33,8 @@ MAX_ESTIMATES_PER_REQUEST = int(env("MAX_ESTIMATES_PER_REQUEST", "3"))
 # --- Website -----------------------------------------------------------------
 # Public https URL of the site (no trailing slash), used for customers' progress links, e.g. https://quoteschmote.com
 PUBLIC_BASE_URL = (env("PUBLIC_BASE_URL", "") or "").rstrip("/")
+# Where the jobs are (visit times, follow-up hours). One setting for now; becomes per-country later.
+TIMEZONE = env("TIMEZONE", "Australia/Melbourne")
 
 # --- Website chat limits ----------------------------------------------------
 # Quote requests one mobile number may confirm per rolling 24h (the paid tier raises this later).

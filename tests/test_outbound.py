@@ -65,3 +65,22 @@ def test_live_mode_sends_to_the_supplier_and_ignores_the_test_recipient(monkeypa
 
 def test_the_test_environment_runs_in_dry_run():
     assert config.OUTBOUND_MODE == "dry_run" and outbound.mode() == "dry_run"  # conftest pins it, so no test can email anyone
+
+
+def test_in_memory_files_such_as_calendar_invites_are_passed_through_in_test_and_live(monkeypatch):
+    got = []
+    monkeypatch.setattr(gmail_service, "send_email", lambda to, s, b, attachment_paths=None, extra_files=None: got.append((to, extra_files)) or ("m", "t"))
+    invite = [("visit.ics", "text/calendar", b"BEGIN:VCALENDAR")]
+    set_mode(monkeypatch, "test", "me@example.com")
+    outbound.deliver("acme@example.com", "S", "B", extra_files=invite)
+    set_mode(monkeypatch, "live")
+    outbound.deliver("acme@example.com", "S", "B", extra_files=invite)
+    set_mode(monkeypatch, "dry_run")
+    outbound.deliver("acme@example.com", "S", "B", extra_files=invite)
+    assert got == [("me@example.com", invite), ("acme@example.com", invite)]  # and nothing at all in a dry run
+
+
+def test_mime_message_carries_the_calendar_file():
+    msg = gmail_service.build_mime_message("a@example.com", "S", "Body", extra_files=[("visit.ics", "text/calendar", b"BEGIN:VCALENDAR\r\n")])
+    names = [p.get_filename() for p in msg.walk() if p.get_filename()]
+    assert names == ["visit.ics"]

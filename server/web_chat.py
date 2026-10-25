@@ -17,12 +17,12 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel
 
 import config
-from db.models import ChatSession, Company, IntakeSession, Job, Quote, ReplyEmail, RfqSend, User, WaMessage
+from db.models import ChatSession, Company, IntakeSession, Job, Quote, ReplyEmail, RfqSend, User, Visit, WaMessage
 from db.session import get_session
 from server import assets
 from server.agent import intake
 from services import attachments as attachments_service
-from services.quote_format import describe_price
+from services.quote_format import describe_price, window_labels
 from services import documents, images
 
 log = logging.getLogger("web_chat")
@@ -407,29 +407,36 @@ def chat_state(request: Request, token: str):
 
 
 # --- Customer progress page ------------------------------------------------------------------------------
-def _supplier_status(db, job: Job, company: Company) -> tuple[str, str]:
-    """(status, detail) for one supplier, from what they have actually done. The supplier's contact details are never shown."""
+def _supplier_status(db, job: Job, company: Company) -> tuple[str, str, str | None]:
+    """(status, detail, link) for one supplier, from what they have actually done. The supplier's contact details are never shown."""
     rfq = db.query(RfqSend).filter_by(job_id=job.id, company_id=company.id, status="sent").first()
     if rfq is None:
-        return "Queued", ""
+        return "Queued", "", None
     reply = db.query(ReplyEmail).filter_by(rfq_send_id=rfq.id).first()
     if reply is None:
-        return "Request sent", ""
+        return "Request sent", "", None
     quote = db.query(Quote).filter_by(reply_email_id=reply.id).first()
     if quote is None:
-        return "Replied", ""
+        return "Replied", "", None
     if quote.kind == "visit":
-        return "Wants a site visit", "Could visit: " + "; ".join(quote.visit_windows or [])
+        visit = db.query(Visit).filter_by(rfq_send_id=rfq.id, status="confirmed").order_by(Visit.created_at.desc()).first()
+        link = f"/j/{job.public_token}/visit/{quote.id}"
+        if visit:
+            return "Visit booked", visit.label, link
+        if quote.windows_declined:
+            return "Waiting for new times", "We've asked them to offer other times", link
+        return "Wants a site visit", "Could visit: " + "; ".join(window_labels(quote.visit_windows)), link
     if quote.kind == "decline":
-        return "Declined", DECLINE_LABELS.get(quote.decline_reason or "", "")
+        return "Declined", DECLINE_LABELS.get(quote.decline_reason or "", ""), None
     if quote.is_quote:
-        return "Quote received", describe_price(quote.price_type, quote.price_amount, quote.price_max)
-    return "Replied", ""
+        return "Quote received", describe_price(quote.price_type, quote.price_amount, quote.price_max), None
+    return "Replied", "", None
 
 
 DECLINE_LABELS = {
     "out_of_area": "Outside their area", "too_busy": "Too busy", "wrong_trade": "Not their type of work", "other": "Can't help",
 }
+LINK_TEXT = {"Wants a site visit": "Choose a time", "Visit booked": "Details and calendar", "Waiting for new times": "View"}
 
 
 @router.get("/j/{public_token}", response_class=HTMLResponse)
@@ -441,18 +448,24 @@ def progress_page(public_token: str):
             return HTMLResponse("<h1>Not found</h1>", status_code=404)
         companies = db.query(Company).filter_by(job_id=job.id, included=True).order_by(Company.name).all()
         rows = [(c.name, *_supplier_status(db, job, c)) for c in companies]
-        count = lambda label: sum(1 for _, s, _d in rows if s == label)  # noqa: E731
-        sent = sum(1 for _, s, _d in rows if s != "Queued")
+        count = lambda label: sum(1 for _, s, _d, _l in rows if s == label)  # noqa: E731
+        sent = sum(1 for _, s, _d, _l in rows if s != "Queued")
         e = html.escape
         if rows:
-            table = "".join(
-                f"<tr><td>{e(n)}</td><td><span class='chip'>{e(s)}</span>"
-                + (f"<div class='detail'>{e(d)}</div>" if d else "") + "</td></tr>"
-                for n, s, d in rows
-            )
+            def cell(status, detail, link):
+                out = f"<span class='chip'>{e(status)}</span>"
+                if detail:
+                    out += f"<div class='detail'>{e(detail)}</div>"
+                if link:
+                    out += f"<div class='detail'><a href='{e(link)}'>{e(LINK_TEXT.get(status, 'View'))} &rarr;</a></div>"
+                return out
+
+            table = "".join(f"<tr><td>{e(n)}</td><td>{cell(s, d, l)}</td></tr>" for n, s, d, l in rows)
             summary = [f"{sent} of {len(rows)} requests sent", f"{count('Quote received')} quote(s) received"]
             if count("Wants a site visit"):
                 summary.append(f"{count('Wants a site visit')} want to visit")
+            if count("Visit booked"):
+                summary.append(f"{count('Visit booked')} visit(s) booked")
             if count("Declined"):
                 summary.append(f"{count('Declined')} declined")
             body = (

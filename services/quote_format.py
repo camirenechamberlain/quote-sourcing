@@ -17,3 +17,8 @@ def describe_price(price_type: str | None, amount: float | None, high: float | N
     if price_type == "hourly":
         return f"{money(amount)} per hour"
     return money(amount)
+
+
+def window_labels(windows) -> list[str]:
+    """Readable labels for a quote's visit windows. Older rows stored plain strings; newer ones are {start, end, label}."""
+    return [w.get("label", "") if isinstance(w, dict) else str(w) for w in windows or []]

@@ -8,7 +8,7 @@ from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
 import config
-from server import assets, supplier_response, web_chat
+from server import assets, customer_visits, supplier_response, web_chat
 
 log = logging.getLogger("server")
 logging.basicConfig(level=logging.INFO)
@@ -19,6 +19,7 @@ STATIC_DIR = Path(__file__).resolve().parent / "static"
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 app.include_router(web_chat.router)
 app.include_router(supplier_response.router)
+app.include_router(customer_visits.router)
 
 CSP = (
     "default-src 'self'; img-src 'self' blob:; style-src 'self'; script-src 'self'; connect-src 'self'; "

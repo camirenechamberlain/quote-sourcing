@@ -1,4 +1,5 @@
 """The supplier's no-login response page (/q/<token>) and how it shows up for the customer."""
+import datetime
 import secrets
 
 import pytest
@@ -7,6 +8,7 @@ from fastapi.testclient import TestClient
 from db.models import Company, Job, Quote, ReplyEmail, RfqSend, User
 from db.session import get_session
 from server import main, supplier_response
+from services import timeutil
 from services.rfq_template import build_body, build_rfq
 from types import SimpleNamespace
 
@@ -168,19 +170,46 @@ def test_long_text_is_capped_and_control_characters_dropped(client, rfq):
 
 
 # ---- site visits and declines -------------------------------------------------------------------------------
-def test_a_site_visit_request_stores_up_to_three_windows(client, rfq):
+def day(days_ahead: int = 7) -> str:
+    return (timeutil.local_now() + datetime.timedelta(days=days_ahead)).date().isoformat()
+
+
+def visit_data(**over):
+    base = {"date1": day(7), "from1": "10:00", "to1": "12:00", "date2": day(8), "from2": "14:00", "to2": "16:30",
+            "date3": "", "from3": "", "to3": "", "price": "4k to 6k", "notes": "Clear the car park"}
+    return {**base, **over}
+
+
+def test_a_site_visit_request_stores_real_dates_and_times(client, rfq):
     token, _, ids = rfq
-    r = client.post(f"/q/{token}/visit", data={"windows": "Tue 10am\n\nThu after 2pm\nFri 9am\nSat 8am", "price": "4k to 6k", "notes": "Clear the car park"})
-    assert r.status_code == 303
+    assert client.post(f"/q/{token}/visit", data=visit_data()).status_code == 303
     q = stored(ids["rfq"])[1][0]
-    assert q.kind == "visit" and not q.is_quote and q.visit_windows == ["Tue 10am", "Thu after 2pm", "Fri 9am"]
-    assert "Ballpark: 4k to 6k" in q.summary and "Clear the car park" in q.summary
+    assert q.kind == "visit" and not q.is_quote and not q.windows_declined
+    first, second = q.visit_windows
+    assert first["start"] == f"{day(7)}T10:00" and first["end"] == f"{day(7)}T12:00"
+    assert first["label"].endswith("10am to 12pm") and second["label"].endswith("2pm to 4:30pm")
+    assert "Ballpark: 4k to 6k" in q.summary and "Clear the car park" in q.summary and "10am to 12pm" in q.summary
 
 
-def test_a_visit_needs_at_least_one_time(client, rfq):
+def test_three_options_duplicates_are_dropped(client, rfq):
     token, _, ids = rfq
-    r = client.post(f"/q/{token}/visit", data={"windows": "  \n ", "price": "", "notes": ""})
-    assert r.status_code == 400 and "at least one time" in r.text and stored(ids["rfq"]) == ([], [])
+    client.post(f"/q/{token}/visit", data=visit_data(date3=day(7), from3="10:00", to3="12:00"))  # same as option 1
+    assert len(stored(ids["rfq"])[1][0].visit_windows) == 2
+
+
+@pytest.mark.parametrize("over, message", [
+    ({"date1": "", "from1": "", "to1": "", "date2": "", "from2": "", "to2": ""}, "at least one time"),
+    ({"to1": ""}, "needs a date and both times"),
+    ({"from1": "12:00", "to1": "10:00"}, "end time must be after"),
+    ({"to1": "23:30", "from1": "09:00"}, "at most 12 hours"),
+    ({"date1": day(-2)}, "in the past"),
+    ({"date1": day(200)}, "more than 90 days"),
+    ({"date1": "not-a-date"}, "valid date and time"),
+])
+def test_bad_visit_times_are_rejected_with_a_message_and_nothing_is_stored(client, rfq, over, message):
+    token, _, ids = rfq
+    r = client.post(f"/q/{token}/visit", data=visit_data(**over))
+    assert r.status_code == 400 and message in r.text and stored(ids["rfq"]) == ([], [])
 
 
 def test_a_decline_stores_the_reason_and_rejects_unknown_ones(client, rfq):
@@ -214,12 +243,12 @@ def test_the_progress_page_shows_quotes_visits_and_declines_without_contact_deta
     db.close()
 
     client.post(f"/q/{token}/quote", data={**QUOTE, "price_type": "range", "price": "4800", "price_max": "5600"})
-    client.post(f"/q/{other[names['Beta Paving']]}/visit", data={"windows": "Tue 10am"})
+    client.post(f"/q/{other[names['Beta Paving']]}/visit", data=visit_data(date2="", from2="", to2=""))
     client.post(f"/q/{other[names['Gamma Slabs']]}/decline", data={"reason": "out_of_area"})
 
     page = client.get(f"/j/{job_token}").text
     assert "1 quote(s) received" in page and "1 want to visit" in page and "1 declined" in page
-    assert "$4,800 to $5,600" in page and "Could visit: Tue 10am" in page and "Outside their area" in page
+    assert "$4,800 to $5,600" in page and "Could visit: " in page and "10am to 12pm" in page and "Choose a time" in page and "Outside their area" in page
     assert "acme@example.com" not in page and "secret.example" not in page  # suppliers' details stay private
 
 

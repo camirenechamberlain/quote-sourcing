@@ -145,7 +145,10 @@ class Quote(Base):
     is_winner: Mapped[bool] = mapped_column(Boolean, default=False)
     kind: Mapped[str] = mapped_column(String, default="quote")  # quote | visit | decline | question
     decline_reason: Mapped[str | None] = mapped_column(String, nullable=True)  # out_of_area | too_busy | wrong_trade | other
-    visit_windows: Mapped[list] = mapped_column(JSON, default=list)  # times the supplier offered for a site visit
+    # Times the supplier offered for a site visit: [{start, end, label}] (naive local ISO). Older rows may hold plain strings.
+    visit_windows: Mapped[list] = mapped_column(JSON, default=list)
+    windows_declined: Mapped[bool] = mapped_column(Boolean, default=False)  # the customer can't do any of the offered times
+    notified_customer_at: Mapped[datetime.datetime | None] = mapped_column(DateTime, nullable=True)  # when we last told the customer
     extracted_at: Mapped[datetime.datetime] = mapped_column(DateTime, default=_now)
 
     reply_email: Mapped["ReplyEmail"] = relationship(back_populates="quote")
@@ -218,3 +221,49 @@ class IntakeSession(Base):
     job_id: Mapped[str | None] = mapped_column(ForeignKey("jobs.id"), nullable=True)
     created_at: Mapped[datetime.datetime] = mapped_column(DateTime, default=_now)
     updated_at: Mapped[datetime.datetime] = mapped_column(DateTime, default=_now, onupdate=_now)
+
+
+class Visit(Base):
+    """A site visit the customer has confirmed with one supplier. Times are naive local ISO strings (see services/timeutil)."""
+
+    __tablename__ = "visits"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
+    job_id: Mapped[str] = mapped_column(ForeignKey("jobs.id"), nullable=False, index=True)
+    rfq_send_id: Mapped[str] = mapped_column(ForeignKey("rfq_sends.id"), nullable=False, index=True)
+    company_id: Mapped[str] = mapped_column(ForeignKey("companies.id"), nullable=False)
+    quote_id: Mapped[str | None] = mapped_column(ForeignKey("quotes.id"), nullable=True)
+    start_local: Mapped[str] = mapped_column(String, nullable=False)  # "2026-11-03T10:00"
+    end_local: Mapped[str] = mapped_column(String, nullable=False)
+    label: Mapped[str] = mapped_column(String, nullable=False)
+    status: Mapped[str] = mapped_column(String, default="confirmed")  # confirmed | cancelled
+    created_at: Mapped[datetime.datetime] = mapped_column(DateTime, default=_now)
+
+
+class Notification(Base):
+    """Every email we send about a job (follow-ups, visit confirmations, updates), for dedupe and an audit trail.
+    `status` is sent | test (redirected to TEST_RECIPIENT) | dry_run (recorded only) | failed."""
+
+    __tablename__ = "notifications"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
+    job_id: Mapped[str | None] = mapped_column(ForeignKey("jobs.id"), nullable=True, index=True)
+    rfq_send_id: Mapped[str | None] = mapped_column(ForeignKey("rfq_sends.id"), nullable=True, index=True)
+    audience: Mapped[str] = mapped_column(String, default="supplier")  # supplier | customer
+    kind: Mapped[str] = mapped_column(String, nullable=False, index=True)  # e.g. chase_1, visit_reminder, customer_digest
+    to_email: Mapped[str] = mapped_column(String, nullable=False)
+    subject: Mapped[str] = mapped_column(String, nullable=False)
+    body: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(String, default="sent")
+    error_message: Mapped[str | None] = mapped_column(String, nullable=True)
+    created_at: Mapped[datetime.datetime] = mapped_column(DateTime, default=_now)
+
+
+class Suppression(Base):
+    """Supplier addresses that have opted out of further requests. Honoured before any supplier email is sent."""
+
+    __tablename__ = "suppressions"
+
+    email: Mapped[str] = mapped_column(String, primary_key=True)  # lower-case
+    reason: Mapped[str] = mapped_column(String, default="opted_out")
+    created_at: Mapped[datetime.datetime] = mapped_column(DateTime, default=_now)

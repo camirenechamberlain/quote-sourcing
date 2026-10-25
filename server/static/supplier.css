@@ -24,3 +24,15 @@
 .supplier .radio { display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 8px 12px; border: 1.5px solid var(--line); border-radius: 10px; font-weight: 500; cursor: pointer; }
 .supplier .radio input { width: 20px; height: 20px; accent-color: var(--ink); }
 .supplier .back { color: var(--muted); text-decoration: none; }
+
+.supplier input[type="date"], .supplier input[type="time"] {
+  padding: 11px 12px; border: 1.5px solid var(--line); border-radius: 10px; font: inherit; background: var(--surface, #fff); color: var(--ink);
+}
+.supplier .slot { display: grid; gap: 8px; margin: 14px 0; padding: 12px; border: 1.5px solid var(--line); border-radius: 12px; }
+.supplier .slot input[type="date"] { width: 100%; }
+.supplier .times { display: flex; align-items: center; gap: 10px; }
+.supplier .times input { flex: 1; min-width: 0; }
+.supplier .notice.ok { background: #e7f6ec; }
+.supplier input, .supplier textarea { box-sizing: border-box; max-width: 100%; }
+.supplier .slot input[type="date"] { min-width: 0; }
+.supplier .slot { grid-template-columns: minmax(0, 1fr); }

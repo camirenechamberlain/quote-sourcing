@@ -37,13 +37,17 @@ def test_recipient() -> str:
     return (config.TEST_RECIPIENT or "").strip()
 
 
-def deliver(to: str, subject: str, body: str, attachment_paths: list[str] | None = None) -> Delivery:
-    """Send (or not) one RFQ according to the mode. Raises OutboundError if the mode can't be honoured."""
+def deliver(to: str, subject: str, body: str, attachment_paths: list[str] | None = None,
+            extra_files: list[tuple[str, str, bytes]] | None = None) -> Delivery:
+    """Send (or not) one email according to the mode. `extra_files` are (name, mime type, bytes) built in memory (calendar
+    invites). Raises OutboundError if the mode can't be honoured."""
     current = mode()
     if current == "dry_run":
         return Delivery(False, None, None, to, False)
 
     from services import gmail_service  # imported here so dry runs never touch Google
+
+    extra = {"extra_files": extra_files} if extra_files else {}
 
     if current == "test":
         recipient = test_recipient()
@@ -51,9 +55,9 @@ def deliver(to: str, subject: str, body: str, attachment_paths: list[str] | None
             raise OutboundError("Test mode needs TEST_RECIPIENT set to your own email address in .env. Nothing was sent.")
         banner = f"[TEST MODE: this email would have gone to {to}. Only you received it.]\n\n"
         message_id, thread_id = gmail_service.send_email(
-            recipient, f"[TEST for {to}] {subject}", banner + body, attachment_paths=attachment_paths
+            recipient, f"[TEST for {to}] {subject}", banner + body, attachment_paths=attachment_paths, **extra
         )
         return Delivery(True, message_id, thread_id, recipient, True)
 
-    message_id, thread_id = gmail_service.send_email(to, subject, body, attachment_paths=attachment_paths)
+    message_id, thread_id = gmail_service.send_email(to, subject, body, attachment_paths=attachment_paths, **extra)
     return Delivery(True, message_id, thread_id, to, False)
