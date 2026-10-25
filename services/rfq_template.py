@@ -21,11 +21,15 @@ def build_subject(job: Job, reference_code: str) -> str:
     return f"Request for Quote: {job.category} — {job.title} [Ref: {reference_code}]"
 
 
-def build_body(job: Job, company: Company, reference_code: str, sender_name: str, attachment_names=()) -> str:
+def build_body(job: Job, company: Company, reference_code: str, sender_name: str, attachment_names=(), response_url: str | None = None) -> str:
     project_line = f"\nProject type: {job.project_type}." if getattr(job, "project_type", None) else ""
     timeframe_line = f"\nWhen the work needs to be done: {job.timeframe}." if getattr(job, "timeframe", None) else ""
     deadline_line = f"\nWe'd appreciate a reply by {job.deadline}." if job.deadline else ""
     attached_line = ("Attached for reference: " + ", ".join(attachment_names) + "\n\n") if attachment_names else ""
+    respond_line = (
+        f"Quickest way to respond (about a minute, no sign-up): send your price, ask to see the job first, or let us know "
+        f"you can't help:\n{response_url}\n\nOr just reply to this email.\n\n"
+    ) if response_url else ""
     return f"""Hi {company.name} team,
 
 I'm writing on behalf of {sender_name} to request a quote for the following job in {job.location_text}:
@@ -42,15 +46,15 @@ Could you please reply with:
 - Estimated timeline to complete the work
 - Any warranty or guarantee on the work
 
-{attached_line}Please keep this reference code in your reply so we can match it up: {reference_code}
+{respond_line}{attached_line}Please keep this reference code in your reply so we can match it up: {reference_code}
 
 Thanks very much,
 Quoteschmote, on behalf of {sender_name}
 """
 
 
-def build_rfq(job: Job, company: Company, sender_name: str, attachment_names=()) -> tuple[str, str, str]:
+def build_rfq(job: Job, company: Company, sender_name: str, attachment_names=(), response_url: str | None = None) -> tuple[str, str, str]:
     reference_code = make_reference_code(job)
     subject = build_subject(job, reference_code)
-    body = build_body(job, company, reference_code, sender_name, attachment_names)
+    body = build_body(job, company, reference_code, sender_name, attachment_names, response_url)
     return reference_code, subject, body

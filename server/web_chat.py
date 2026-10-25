@@ -22,6 +22,7 @@ from db.session import get_session
 from server import assets
 from server.agent import intake
 from services import attachments as attachments_service
+from services.quote_format import describe_price
 from services import documents, images
 
 log = logging.getLogger("web_chat")
@@ -406,15 +407,29 @@ def chat_state(request: Request, token: str):
 
 
 # --- Customer progress page ------------------------------------------------------------------------------
-def _supplier_status(db, job: Job, company: Company) -> str:
+def _supplier_status(db, job: Job, company: Company) -> tuple[str, str]:
+    """(status, detail) for one supplier, from what they have actually done. The supplier's contact details are never shown."""
     rfq = db.query(RfqSend).filter_by(job_id=job.id, company_id=company.id, status="sent").first()
     if rfq is None:
-        return "Queued"
+        return "Queued", ""
     reply = db.query(ReplyEmail).filter_by(rfq_send_id=rfq.id).first()
     if reply is None:
-        return "Request sent"
+        return "Request sent", ""
     quote = db.query(Quote).filter_by(reply_email_id=reply.id).first()
-    return "Quote received" if quote and quote.is_quote else "Replied"
+    if quote is None:
+        return "Replied", ""
+    if quote.kind == "visit":
+        return "Wants a site visit", "Could visit: " + "; ".join(quote.visit_windows or [])
+    if quote.kind == "decline":
+        return "Declined", DECLINE_LABELS.get(quote.decline_reason or "", "")
+    if quote.is_quote:
+        return "Quote received", describe_price(quote.price_type, quote.price_amount, quote.price_max)
+    return "Replied", ""
+
+
+DECLINE_LABELS = {
+    "out_of_area": "Outside their area", "too_busy": "Too busy", "wrong_trade": "Not their type of work", "other": "Can't help",
+}
 
 
 @router.get("/j/{public_token}", response_class=HTMLResponse)
@@ -425,14 +440,23 @@ def progress_page(public_token: str):
         if job is None:
             return HTMLResponse("<h1>Not found</h1>", status_code=404)
         companies = db.query(Company).filter_by(job_id=job.id, included=True).order_by(Company.name).all()
-        rows = [(c.name, _supplier_status(db, job, c)) for c in companies]
-        sent = sum(1 for _, s in rows if s != "Queued")
-        quotes = sum(1 for _, s in rows if s == "Quote received")
+        rows = [(c.name, *_supplier_status(db, job, c)) for c in companies]
+        count = lambda label: sum(1 for _, s, _d in rows if s == label)  # noqa: E731
+        sent = sum(1 for _, s, _d in rows if s != "Queued")
         e = html.escape
         if rows:
-            table = "".join(f"<tr><td>{e(n)}</td><td><span class='chip'>{e(s)}</span></td></tr>" for n, s in rows)
+            table = "".join(
+                f"<tr><td>{e(n)}</td><td><span class='chip'>{e(s)}</span>"
+                + (f"<div class='detail'>{e(d)}</div>" if d else "") + "</td></tr>"
+                for n, s, d in rows
+            )
+            summary = [f"{sent} of {len(rows)} requests sent", f"{count('Quote received')} quote(s) received"]
+            if count("Wants a site visit"):
+                summary.append(f"{count('Wants a site visit')} want to visit")
+            if count("Declined"):
+                summary.append(f"{count('Declined')} declined")
             body = (
-                f"<p class='muted'>{sent} of {len(rows)} requests sent &middot; {quotes} quote(s) received</p>"
+                f"<p class='muted'>{' &middot; '.join(summary)}</p>"
                 f"<table><thead><tr><th>Supplier</th><th>Status</th></tr></thead><tbody>{table}</tbody></table>"
             )
         else:

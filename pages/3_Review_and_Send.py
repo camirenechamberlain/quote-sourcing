@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import datetime
+import secrets
 import time
 from pathlib import Path
 
 import streamlit as st
 
+import config
 from branding import inject_branding, brand_header
 from db.models import AppSetting, Company, Job, RfqSend, User
 from db.session import get_session
@@ -53,6 +55,10 @@ elif mode == "test":
         st.error("**Test mode** needs `TEST_RECIPIENT` set to your own email address in `.env`. Nothing can be sent until it is.")
 else:
     st.error("**LIVE.** These emails go to real businesses.")
+
+if not config.PUBLIC_BASE_URL:
+    st.warning("`PUBLIC_BASE_URL` isn't set in `.env` (for example `https://quoteschmote.com`), so these emails will NOT include the "
+               "one-tap response link for suppliers. They can still reply by email.")
 
 with st.expander(f"📎 Attachments ({len(job.attachment_paths or [])}) — sent with every RFQ for this job", expanded=True):
     current = job.attachment_paths or []
@@ -114,11 +120,17 @@ if "rfq_drafts" not in st.session_state or st.session_state.get("rfq_drafts_job"
     for c in companies:
         if c.id in already_sent_ids:
             continue
-        ref, subject, body = build_rfq(job, c, sender_name, attachments_service.supplier_file_names(job.attachment_paths))
+        # Each request gets its own unguessable response link (needs PUBLIC_BASE_URL, e.g. https://quoteschmote.com).
+        response_token = secrets.token_urlsafe(16)
+        response_url = f"{config.PUBLIC_BASE_URL}/q/{response_token}" if config.PUBLIC_BASE_URL else None
+        ref, subject, body = build_rfq(
+            job, c, sender_name, attachments_service.supplier_file_names(job.attachment_paths), response_url
+        )
         st.session_state.rfq_drafts[c.id] = {
             "select": True,
             "email": c.discovered_email,
             "reference_code": ref,
+            "response_token": response_token,
             "subject": subject,
             "body": body,
         }
@@ -185,6 +197,7 @@ if st.button(button_label, type="primary", disabled=not to_send or blocked):
                                recipient_email=draft["email"], subject=draft["subject"], body=draft["body"])
             session.add(rfq_send)
         rfq_send.reference_code, rfq_send.recipient_email = draft["reference_code"], draft["email"]
+        rfq_send.response_token = draft.get("response_token")
         rfq_send.subject, rfq_send.body, rfq_send.status, rfq_send.error_message = draft["subject"], draft["body"], "draft", None
         session.commit()
 

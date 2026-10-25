@@ -1,0 +1,26 @@
+/* Supplier response page (/q/<token>). Builds on chat.css (tokens, .card, .brand, .muted, .error, .fine). */
+.supplier h2 { margin: 16px 0 4px; }
+.supplier .facts { list-style: none; padding: 0; margin: 10px 0; display: grid; gap: 4px; font-size: 0.95rem; }
+.supplier .brief { white-space: pre-line; background: var(--surface, #fff); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; margin: 8px 0 18px; }
+.supplier .notice { background: var(--accent-soft); border-radius: 12px; padding: 12px 14px; margin: 12px 0; line-height: 1.4; }
+
+.supplier .btn {
+  display: flex; align-items: center; justify-content: center; width: 100%; min-height: 52px; margin: 10px 0; padding: 12px 18px;
+  border: 1.5px solid var(--ink); border-radius: 999px; background: var(--surface, #fff); color: var(--ink);
+  font: inherit; font-weight: 700; text-decoration: none; cursor: pointer;
+}
+.supplier .btn.primary { background: var(--cta); border-color: transparent; color: #fff; }
+.supplier .btn.quiet { border-color: var(--line); color: var(--muted); font-weight: 500; }
+.supplier .btn:active { filter: brightness(0.92); }
+
+.supplier .f { margin: 14px 0; }
+.supplier .f label, .supplier .f .label { display: block; font-weight: 600; margin-bottom: 6px; }
+.supplier input[type="text"], .supplier textarea {
+  width: 100%; padding: 12px; border: 1.5px solid var(--line); border-radius: 10px; font: inherit; background: var(--surface, #fff); color: var(--ink);
+}
+.supplier input[type="text"]:focus, .supplier textarea:focus { outline: 2px solid var(--accent); border-color: transparent; }
+.supplier textarea { resize: vertical; }
+.supplier .radios { display: grid; gap: 8px; }
+.supplier .radio { display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 8px 12px; border: 1.5px solid var(--line); border-radius: 10px; font-weight: 500; cursor: pointer; }
+.supplier .radio input { width: 20px; height: 20px; accent-color: var(--ink); }
+.supplier .back { color: var(--muted); text-decoration: none; }

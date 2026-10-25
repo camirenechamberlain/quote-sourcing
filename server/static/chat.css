@@ -202,3 +202,4 @@ main { max-width: none; }
 .quick button.main:disabled { opacity: 0.4; }
 
 .quick button.assist { border: 1.5px dashed var(--accent); color: var(--accent); background: var(--accent-soft); font-weight: 600; }
+.detail { margin-top: 4px; font-size: 0.85rem; color: var(--muted); }

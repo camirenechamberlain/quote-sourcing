@@ -121,6 +121,16 @@ to two shortcuts:
 
 Estimates were checked on synthetic scenes only; expect real angled photos to be rougher, which is why the customer confirms.
 
+### Supplier response page
+
+Each RFQ email carries a one-tap link (`/q/<token>`, set `PUBLIC_BASE_URL` so it can be built) to a no-login page where the supplier
+sends a quote (fixed, range or hourly, with inclusions, exclusions, timeline and warranty), asks to see the job first (offering up to three
+visit times), or declines with a reason (for example outside their area). Replying by email still works. A response is stored like an
+emailed reply (a `ReplyEmail` plus a structured `Quote`), so Compare Quotes and the customer's progress page show it with no extra work, and
+submitting again from the same link revises it. The page is plain server-rendered HTML (no JavaScript), indexed by no one, rate limited,
+and escapes everything it shows. The customer's progress page lists each supplier's status (quote with price, wants a site visit, declined)
+and never shows supplier contact details.
+
 ### Photos and PDF attachments
 
 Once the chat is under way, choosing photos sends them straight away (on the landing page they wait for the job description, and

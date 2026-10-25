@@ -96,6 +96,8 @@ class RfqSend(Base):
     gmail_thread_id: Mapped[str | None] = mapped_column(String, nullable=True)
     status: Mapped[str] = mapped_column(String, default="draft")  # draft|sent|failed
     test_mode: Mapped[bool] = mapped_column(Boolean, default=False)  # sent to the TEST_RECIPIENT, not the supplier
+    # Unguessable key for the supplier's no-login response page (/q/<token>); the link in the RFQ email carries it.
+    response_token: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
     sent_at: Mapped[datetime.datetime | None] = mapped_column(DateTime, nullable=True)
     error_message: Mapped[str | None] = mapped_column(String, nullable=True)
 
@@ -115,6 +117,7 @@ class ReplyEmail(Base):
     subject: Mapped[str | None] = mapped_column(String, nullable=True)
     raw_body_text: Mapped[str] = mapped_column(Text, nullable=False)
     ingested_at: Mapped[datetime.datetime] = mapped_column(DateTime, default=_now)
+    source: Mapped[str] = mapped_column(String, default="email")  # email | web (the supplier used the response page)
 
     rfq_send: Mapped["RfqSend"] = relationship(back_populates="replies")
     quote: Mapped["Quote"] = relationship(back_populates="reply_email", uselist=False, cascade="all, delete-orphan")
@@ -140,6 +143,9 @@ class Quote(Base):
     summary: Mapped[str | None] = mapped_column(String, nullable=True)
     llm_raw_response: Mapped[str | None] = mapped_column(Text, nullable=True)
     is_winner: Mapped[bool] = mapped_column(Boolean, default=False)
+    kind: Mapped[str] = mapped_column(String, default="quote")  # quote | visit | decline | question
+    decline_reason: Mapped[str | None] = mapped_column(String, nullable=True)  # out_of_area | too_busy | wrong_trade | other
+    visit_windows: Mapped[list] = mapped_column(JSON, default=list)  # times the supplier offered for a site visit
     extracted_at: Mapped[datetime.datetime] = mapped_column(DateTime, default=_now)
 
     reply_email: Mapped["ReplyEmail"] = relationship(back_populates="quote")
