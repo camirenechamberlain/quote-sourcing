@@ -53,3 +53,7 @@ GLOBAL_DAILY_MESSAGES = int(env("GLOBAL_DAILY_MESSAGES", "1500"))
 OUTBOUND_MODE = env("OUTBOUND_MODE", "dry_run")  # dry_run | test | live (anything else is treated as dry_run)
 # In test mode every RFQ is redirected to this address (your own inbox) instead of the supplier.
 TEST_RECIPIENT = env("TEST_RECIPIENT", "")
+# Automated follow-ups (supplier chases, visit reminders, customer updates). Off by default: turn on once sending is set up.
+# They still obey OUTBOUND_MODE, so in dry_run they are only logged.
+FOLLOWUPS_ENABLED = env("FOLLOWUPS_ENABLED", "0") == "1"
+FOLLOWUP_INTERVAL_MINUTES = max(1, int(env("FOLLOWUP_INTERVAL_MINUTES", "15")))

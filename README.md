@@ -131,6 +131,29 @@ submitting again from the same link revises it. The page is plain server-rendere
 and escapes everything it shows. The customer's progress page lists each supplier's status (quote with price, wants a site visit, declined)
 and never shows supplier contact details.
 
+### Site visits
+
+Many trades can't price without seeing the job, so suppliers can offer up to three real date-and-time windows instead of a price. The customer
+chooses one from their progress page (`/j/<token>/visit/<id>`) after a consent step that names exactly what is shared (first name, mobile and
+the job address, with that one supplier). "None of these suit" asks the supplier for new times and cancelling is one tap. Confirming emails both
+sides with a calendar invite (`.ics`, floating local time); the supplier page shows the customer's details only after confirmation. Times use the
+`TIMEZONE` setting (default `Australia/Melbourne`).
+
+### Automated follow-ups
+
+`services/followups.py` keeps requests moving without anyone chasing by hand: a supplier who hasn't responded is nudged at 3 and 7 days (never
+more, never after 14 days); the customer gets one digest (at most every 4 hours) of new quotes, visit offers and declines, and reminders to pick
+a visit time at 24 and 72 hours; both sides get a reminder within 24 hours of a visit; a supplier who visited but hasn't quoted is nudged at 2 and
+6 days after; and a customer with quotes waiting gets one nudge after 3 days. It only sends 08:00 to 18:00 local, Monday to Saturday, at most 40
+emails per run and 200 per day, and every email is recorded in the `Notification` table, which also stops anything sending twice.
+
+- Preview what is due: `.venv\Scripts\python.exe -m services.followups` (add `--send` to really send). The **Outbox** page in the admin app shows
+  the same, the recent emails and who has opted out.
+- Run it automatically: set `FOLLOWUPS_ENABLED=1` in `.env` and restart the site (`FOLLOWUP_INTERVAL_MINUTES`, default 15). It is off by default.
+- It obeys `OUTBOUND_MODE` (dry_run only logs; test redirects to `TEST_RECIPIENT`; live sends) and never emails an address that has opted out
+  (the "Don't contact me" link on every supplier page and email). Customer emails that depend on a link are held back until `PUBLIC_BASE_URL`
+  is set.
+
 ### Photos and PDF attachments
 
 Once the chat is under way, choosing photos sends them straight away (on the landing page they wait for the job description, and

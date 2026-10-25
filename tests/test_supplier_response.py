@@ -262,3 +262,35 @@ def test_the_rfq_email_offers_the_one_minute_response_link_only_when_there_is_on
     assert with_link.index("/q/abc123") < with_link.index("Please keep this reference code")
     assert "/q/" not in build_body(job, acme, "REF-1", "Irene", [])
     assert "https://x.test/q/t" in build_rfq(job, acme, "Irene", [], "https://x.test/q/t")[2]
+
+
+# ---- opting out ----------------------------------------------------------------------------------------------
+def test_every_supplier_page_offers_a_way_to_stop_and_the_email_carries_it(client, rfq):
+    token, _, _ = rfq
+    assert f"/q/{token}/optout" in client.get(f"/q/{token}").text
+    job = SimpleNamespace(description="x", location_text="y", budget_min=None, budget_max=None, deadline=None, project_type=None,
+                          timeframe=None, ref_prefix="AB12CD34", category="concreter", title="t")
+    body = build_body(job, SimpleNamespace(name="Acme"), "REF", "Irene", [], "https://x.test/q/abc")
+    assert "Stop them here: https://x.test/q/abc/optout" in body
+    assert "optout" not in build_body(job, SimpleNamespace(name="Acme"), "REF", "Irene", [])
+
+
+def test_opting_out_suppresses_the_address_records_a_decline_and_confirms(client, rfq):
+    from db.models import Suppression
+    from services.notify import is_suppressed
+
+    token, job_token, ids = rfq
+    assert "Yes, stop contacting me" in client.get(f"/q/{token}/optout").text  # a confirmation step, so a stray tap does nothing
+    assert not is_suppressed(get_session(), "acme@example.com")
+    try:
+        r = client.post(f"/q/{token}/optout")
+        assert r.status_code == 200 and "You're off the list" in r.text
+        assert is_suppressed(get_session(), "ACME@example.com")  # matched whatever the case
+        q = stored(ids["rfq"])[1][0]
+        assert q.kind == "decline" and "not to be contacted" in q.summary
+        assert "Declined" in client.get(f"/j/{job_token}").text  # the customer sees that this supplier is out
+    finally:  # the database is shared between tests, so don't leave a global opt-out behind
+        db = get_session()
+        db.query(Suppression).filter_by(email="acme@example.com").delete()
+        db.commit()
+        db.close()

@@ -20,6 +20,7 @@ from server import assets
 from server.web_chat import SlidingWindow, client_ip
 from services import attachments as attachments_service
 from services import timeutil
+from services.notify import suppress
 from services.quote_format import describe_price, window_labels
 from services.visit_messages import visit_invite
 
@@ -187,7 +188,8 @@ def _landing(db, token: str, rfq: RfqSend, job: Job, company: Company, saved: bo
         banner = ("<div class='notice'><b>The customer can't make those times.</b><br>Please offer a couple of other times "
                   f"below.</div>") + banner
     ask = "<p><b>Change your response</b></p>" if existing else "<p><b>How would you like to respond?</b></p>"
-    foot = "<p class='fine'>Prefer email? Just reply to the email you received. That works too. No account needed.</p>"
+    foot = ("<p class='fine'>Prefer email? Just reply to the email you received. That works too. No account needed.<br>"
+            f"<a href='/q/{token}/optout'>Don't contact me about requests like this</a></p>")
     return _page("Quote request", f"{banner}{_brief(db, job, rfq)}{ask}{_actions(token)}{foot}")
 
 
@@ -436,5 +438,34 @@ def decline_submit(request: Request, token: str, reason: str = Form(""), notes: 
             return _page("Can't help", _decline_form(token, {"notes": notes}, "Please choose a reason."), 400)
         save_response(db, rfq, job, company, kind="decline", decline_reason=reason, notes=clean_text(notes))
         return RedirectResponse(f"/q/{token}?saved=1", status_code=303)
+    finally:
+        db.close()
+
+
+@router.get("/q/{token}/optout", response_class=HTMLResponse)
+def optout_form(request: Request, token: str):
+    gate = _gate(request, token)
+    if isinstance(gate, HTMLResponse):
+        return gate
+    db, (rfq, job, company) = gate
+    try:
+        return _page("Stop requests", f"{_back(token)}<h2>Stop these requests?</h2><p class='muted'>We'll stop contacting "
+                     f"{e(rfq.recipient_email)} about quote requests, from every customer. You can still reply to any email you've already received.</p>"
+                     f"<form method='post' action='/q/{token}/optout'><button class='btn primary' type='submit'>Yes, stop contacting me</button></form>")
+    finally:
+        db.close()
+
+
+@router.post("/q/{token}/optout", response_class=HTMLResponse)
+def optout_submit(request: Request, token: str):
+    gate = _gate(request, token, submitting=True)
+    if isinstance(gate, HTMLResponse):
+        return gate
+    db, (rfq, job, company) = gate
+    try:
+        suppress(db, rfq.recipient_email, "opted_out_via_link")
+        save_response(db, rfq, job, company, kind="decline", decline_reason="other", notes="Asked not to be contacted about future requests.")
+        return _page("Done", "<h2>You're off the list</h2><p class='muted'>We won't contact you about quote requests again. "
+                     "Sorry for the interruption, and thanks for letting us know.</p>")
     finally:
         db.close()

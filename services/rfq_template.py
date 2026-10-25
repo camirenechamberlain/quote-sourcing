@@ -30,6 +30,7 @@ def build_body(job: Job, company: Company, reference_code: str, sender_name: str
         f"Quickest way to respond (about a minute, no sign-up): send your price, ask to see the job first, or let us know "
         f"you can't help:\n{response_url}\n\nOr just reply to this email.\n\n"
     ) if response_url else ""
+    optout_line = f"\nNot interested in requests like this? Stop them here: {response_url}/optout\n" if response_url else ""
     return f"""Hi {company.name} team,
 
 I'm writing on behalf of {sender_name} to request a quote for the following job in {job.location_text}:
@@ -50,7 +51,7 @@ Could you please reply with:
 
 Thanks very much,
 Quoteschmote, on behalf of {sender_name}
-"""
+{optout_line}"""
 
 
 def build_rfq(job: Job, company: Company, sender_name: str, attachment_names=(), response_url: str | None = None) -> tuple[str, str, str]:

@@ -13,6 +13,7 @@ from db.models import AppSetting, Company, Job, RfqSend, User
 from db.session import get_session
 from services import attachments as attachments_service
 from services import outbound
+from services.notify import is_suppressed
 from services.gmail_service import GmailNotConnected
 from services.rfq_template import build_rfq
 
@@ -104,7 +105,7 @@ companies = (
 )
 
 already_sent_ids = {
-    rs.company_id for rs in session.query(RfqSend).filter_by(job_id=job.id, status="sent", test_mode=False).all()
+    rs.company_id for rs in session.query(RfqSend).filter(RfqSend.job_id == job.id, RfqSend.status == "sent", RfqSend.test_mode.isnot(True)).all()
 }  # test sends don't count: they never reached the supplier
 
 if not companies:
@@ -188,6 +189,10 @@ if st.button(button_label, type="primary", disabled=not to_send or blocked):
     progress = st.progress(0.0)
     for i, (company, draft) in enumerate(to_send):
         rfq_send = session.query(RfqSend).filter_by(job_id=job.id, company_id=company.id).first()
+        if is_suppressed(session, draft["email"]):  # they asked us to stop: never email them again
+            results.append((company.name, "skipped (this supplier opted out of requests)"))
+            progress.progress((i + 1) / len(to_send))
+            continue
         if rfq_send and rfq_send.status == "sent" and not rfq_send.test_mode:
             results.append((company.name, "skipped (already sent to this company for this job)"))
             progress.progress((i + 1) / len(to_send))

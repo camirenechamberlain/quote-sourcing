@@ -6,6 +6,7 @@ and as an audit trail. Sending never raises: a failure is recorded and the calle
 """
 from __future__ import annotations
 
+import datetime
 import logging
 
 from db.models import Notification, Suppression
@@ -40,7 +41,7 @@ def already_sent(db, kind: str, *, rfq_send_id: str | None = None, job_id: str |
 
 def send_notification(db, *, audience: str, kind: str, to_email: str, subject: str, body: str, job_id: str | None = None,
                       rfq_send_id: str | None = None, extra_files: list[tuple[str, str, bytes]] | None = None,
-                      record_dry_run: bool = True) -> Notification | None:
+                      record_dry_run: bool = True, created_at: datetime.datetime | None = None) -> Notification | None:
     """Send (per OUTBOUND_MODE) and record. Returns the Notification, or None when nothing was sent or recorded."""
     if audience == "supplier" and is_suppressed(db, to_email):
         log.info("Not emailing %s: they opted out", to_email)
@@ -54,8 +55,9 @@ def send_notification(db, *, audience: str, kind: str, to_email: str, subject: s
         status, error = "failed", str(exc)[:300]
     if status == "dry_run" and not record_dry_run:
         return None
+    stamp = {"created_at": created_at} if created_at else {}  # followups pass their run time so a simulated clock stays consistent
     note = Notification(job_id=job_id, rfq_send_id=rfq_send_id, audience=audience, kind=kind, to_email=to_email, subject=subject,
-                        body=body, status=status, error_message=error)
+                        body=body, status=status, error_message=error, **stamp)
     db.add(note)
     db.commit()
     return note
