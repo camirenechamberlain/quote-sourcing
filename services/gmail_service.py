@@ -45,19 +45,12 @@ def _attach_file(message: MIMEMultipart, path: Path, photo_number: int = 1) -> N
 
 
 def build_mime_message(to: str, subject: str, body: str, attachment_paths: list[str] | None = None,
-                       extra_files: list[tuple[str, str, bytes]] | None = None, html: str | None = None):
-    """`extra_files` are (filename, mime type, bytes) attachments built in memory, such as a calendar invite.
-    With `html`, the text and HTML versions go together (multipart/alternative) so every mail app can show one or the other."""
+                       extra_files: list[tuple[str, str, bytes]] | None = None):
+    """`extra_files` are (filename, mime type, bytes) attachments built in memory, such as a calendar invite."""
     valid_attachments = [Path(p) for p in (attachment_paths or []) if Path(p).exists()]
-    if html:
-        body_part = MIMEMultipart("alternative")
-        body_part.attach(MIMEText(body, _charset="utf-8"))  # plain text first, the HTML last (clients prefer the last they can show)
-        body_part.attach(MIMEText(html, "html", _charset="utf-8"))
-    else:
-        body_part = MIMEText(body, _charset="utf-8")
     if valid_attachments or extra_files:
         message = MIMEMultipart()
-        message.attach(body_part)
+        message.attach(MIMEText(body, _charset="utf-8"))
         photo_number = 0
         for path in valid_attachments:
             if path.suffix.lower() != ".pdf":
@@ -71,7 +64,7 @@ def build_mime_message(to: str, subject: str, body: str, attachment_paths: list[
             part.add_header("Content-Disposition", "attachment", filename=filename)
             message.attach(part)
     else:
-        message = body_part
+        message = MIMEText(body, _charset="utf-8")
 
     message["to"] = to
     message["subject"] = Header(subject, "utf-8")
@@ -79,10 +72,10 @@ def build_mime_message(to: str, subject: str, body: str, attachment_paths: list[
 
 
 def send_email(to: str, subject: str, body: str, attachment_paths: list[str] | None = None,
-               extra_files: list[tuple[str, str, bytes]] | None = None, html: str | None = None) -> tuple[str, str]:
-    """Sends an email (plain text, plus an HTML version if given), optionally with file attachments. Returns (message_id, thread_id)."""
+               extra_files: list[tuple[str, str, bytes]] | None = None) -> tuple[str, str]:
+    """Sends a plain-text email, optionally with file attachments. Returns (message_id, thread_id)."""
     service = _service()
-    message = build_mime_message(to, subject, body, attachment_paths, extra_files, html)
+    message = build_mime_message(to, subject, body, attachment_paths, extra_files)
     raw = base64.urlsafe_b64encode(message.as_bytes()).decode()
     sent = service.users().messages().send(userId="me", body={"raw": raw}).execute()
     return sent["id"], sent["threadId"]

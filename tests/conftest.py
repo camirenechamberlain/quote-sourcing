@@ -55,15 +55,6 @@ def photos_first_off_by_default(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
-def html_email_off_by_default(monkeypatch):
-    """Most tests fake the mail transport with a plain-text signature. test_email_html.py turns the HTML version on."""
-    import config
-
-    monkeypatch.setattr(config, "EMAIL_HTML", False)
-    yield
-
-
-@pytest.fixture(autouse=True)
 def stub_supplier_review(monkeypatch):
     """The real reviewer calls the Anthropic API. Tests default to 'nothing missing'; individual tests override this."""
     from server.agent import supplier_review

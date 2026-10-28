@@ -11,7 +11,6 @@ import re
 from typing import NamedTuple
 
 import config
-from services import email_html
 
 MODES = ("dry_run", "test", "live")
 _EMAIL = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
@@ -50,19 +49,15 @@ def deliver(to: str, subject: str, body: str, attachment_paths: list[str] | None
 
     extra = {"extra_files": extra_files} if extra_files else {}
 
-    def with_html(text: str) -> dict:
-        """The HTML version (with response buttons) goes alongside the text one; off with EMAIL_HTML=0."""
-        return {**extra, "html": email_html.render(text)} if config.EMAIL_HTML else extra
-
     if current == "test":
         recipient = test_recipient()
         if not _EMAIL.match(recipient):
             raise OutboundError("Test mode needs TEST_RECIPIENT set to your own email address in .env. Nothing was sent.")
         banner = f"[TEST MODE: this email would have gone to {to}. Only you received it.]\n\n"
         message_id, thread_id = gmail_service.send_email(
-            recipient, f"[TEST for {to}] {subject}", banner + body, attachment_paths=attachment_paths, **with_html(banner + body)
+            recipient, f"[TEST for {to}] {subject}", banner + body, attachment_paths=attachment_paths, **extra
         )
         return Delivery(True, message_id, thread_id, recipient, True)
 
-    message_id, thread_id = gmail_service.send_email(to, subject, body, attachment_paths=attachment_paths, **with_html(body))
+    message_id, thread_id = gmail_service.send_email(to, subject, body, attachment_paths=attachment_paths, **extra)
     return Delivery(True, message_id, thread_id, to, False)
