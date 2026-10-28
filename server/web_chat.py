@@ -22,7 +22,8 @@ from db.session import get_session
 from server import assets
 from server.agent import intake
 from services import attachments as attachments_service
-from services.quote_format import describe_price, window_labels
+from services.job_state import is_open, summarise
+from services.quote_format import describe_price, money, window_labels
 from services import documents, images
 
 log = logging.getLogger("web_chat")
@@ -409,6 +410,8 @@ def chat_state(request: Request, token: str):
 # --- Customer progress page ------------------------------------------------------------------------------
 def _supplier_status(db, job: Job, company: Company) -> tuple[str, str, str | None]:
     """(status, detail, link) for one supplier, from what they have actually done. The supplier's contact details are never shown."""
+    if job.chosen_company_id == company.id:
+        return "Chosen", (f"Agreed price {money(job.final_price)}" if job.final_price else ""), None
     rfq = db.query(RfqSend).filter_by(job_id=job.id, company_id=company.id, status="sent").first()
     if rfq is None:
         return "Queued", "", None
@@ -418,9 +421,10 @@ def _supplier_status(db, job: Job, company: Company) -> tuple[str, str, str | No
     quote = db.query(Quote).filter_by(reply_email_id=reply.id).first()
     if quote is None:
         return "Replied", "", None
+    open_ = is_open(job)
     if quote.kind == "visit":
         visit = db.query(Visit).filter_by(rfq_send_id=rfq.id, status="confirmed").order_by(Visit.created_at.desc()).first()
-        link = f"/j/{job.public_token}/visit/{quote.id}"
+        link = f"/j/{job.public_token}/visit/{quote.id}" if open_ else None
         if visit:
             return "Visit booked", visit.label, link
         if quote.windows_declined:
@@ -429,39 +433,53 @@ def _supplier_status(db, job: Job, company: Company) -> tuple[str, str, str | No
     if quote.kind == "decline":
         return "Declined", DECLINE_LABELS.get(quote.decline_reason or "", ""), None
     if quote.is_quote:
-        return "Quote received", describe_price(quote.price_type, quote.price_amount, quote.price_max), None
+        return "Quote received", describe_price(quote.price_type, quote.price_amount, quote.price_max), (
+            f"/j/{job.public_token}/choose/{quote.id}" if open_ else None)
     return "Replied", "", None
 
 
 DECLINE_LABELS = {
     "out_of_area": "Outside their area", "too_busy": "Too busy", "wrong_trade": "Not their type of work", "other": "Can't help",
 }
-LINK_TEXT = {"Wants a site visit": "Choose a time", "Visit booked": "Details and calendar", "Waiting for new times": "View"}
+LINK_TEXT = {"Wants a site visit": "Choose a time", "Visit booked": "Details and calendar", "Waiting for new times": "View",
+             "Quote received": "Choose this supplier"}
 
 
 @router.get("/j/{public_token}", response_class=HTMLResponse)
-def progress_page(public_token: str):
+def progress_page(public_token: str, updated: int = 0):
     db = get_session()
     try:
         job = db.query(Job).filter_by(public_token=public_token).first()
         if job is None:
             return HTMLResponse("<h1>Not found</h1>", status_code=404)
-        companies = db.query(Company).filter_by(job_id=job.id, included=True).order_by(Company.name).all()
+        contacted_ids = {r.company_id for r in db.query(RfqSend).filter(RfqSend.job_id == job.id, RfqSend.status == "sent").all()}
+        companies = [c for c in db.query(Company).filter_by(job_id=job.id).order_by(Company.name).all() if c.id in contacted_ids]
         rows = [(c.name, *_supplier_status(db, job, c)) for c in companies]
         count = lambda label: sum(1 for _, s, _d, _l in rows if s == label)  # noqa: E731
-        sent = sum(1 for _, s, _d, _l in rows if s != "Queued")
         e = html.escape
-        if rows:
-            def cell(status, detail, link):
-                out = f"<span class='chip'>{e(status)}</span>"
-                if detail:
-                    out += f"<div class='detail'>{e(detail)}</div>"
-                if link:
-                    out += f"<div class='detail'><a href='{e(link)}'>{e(LINK_TEXT.get(status, 'View'))} &rarr;</a></div>"
-                return out
+        summary_state = summarise(db, job)
+        token = e(public_token)
 
+        if job.status == "AWARDED":
+            banner = f"<div class='notice ok'><b>{e(summary_state.label)}</b>" + (f"<br>Agreed price {e(money(job.final_price))}" if job.final_price else "") + "</div>"
+        elif job.status == "CLOSED":
+            banner = "<div class='notice'><b>This request is closed.</b> The suppliers we contacted have been told.</div>"
+        else:
+            banner = f"<p><span class='chip'>{e(summary_state.label)}</span></p>"
+        if updated:
+            banner = "<div class='notice ok'>Added to your request. Any suppliers we've contacted have been emailed.</div>" + banner
+
+        def cell(status, detail, link):
+            out = f"<span class='chip'>{e(status)}</span>"
+            if detail:
+                out += f"<div class='detail'>{e(detail)}</div>"
+            if link:
+                out += f"<div class='detail'><a href='{e(link)}'>{e(LINK_TEXT.get(status, 'View'))} &rarr;</a></div>"
+            return out
+
+        if rows:
             table = "".join(f"<tr><td>{e(n)}</td><td>{cell(s, d, l)}</td></tr>" for n, s, d, l in rows)
-            summary = [f"{sent} of {len(rows)} requests sent", f"{count('Quote received')} quote(s) received"]
+            summary = [f"{len(rows)} supplier{'s' if len(rows) != 1 else ''} contacted", f"{count('Quote received') + count('Chosen')} quote(s) received"]
             if count("Wants a site visit"):
                 summary.append(f"{count('Wants a site visit')} want to visit")
             if count("Visit booked"):
@@ -473,14 +491,19 @@ def progress_page(public_token: str):
                 f"<table><thead><tr><th>Supplier</th><th>Status</th></tr></thead><tbody>{table}</tbody></table>"
             )
         else:
-            body = "<p>We're finding suppliers for you. This page refreshes automatically.</p>"
+            body = "<p>We're finding suppliers for you. This page refreshes automatically.</p>" if is_open(job) else ""
+
+        actions = ""
+        if is_open(job):
+            actions = (f"<a class='btn' href='/j/{token}/update'>Add details or photos</a>"
+                       f"<a class='btn quiet' href='/j/{token}/close'>Close this request</a>")
         page = f"""<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1"><meta http-equiv="refresh" content="60">
 <meta name="robots" content="noindex"><title>Your quote request</title>
-<link rel="stylesheet" href="{assets.asset('chat.css')}"></head><body class="page">
-<main class="card"><h1 class="brand"><span class="b1">quote</span><span class="b2">schmote</span></h1>
+<link rel="stylesheet" href="{assets.asset('chat.css')}"><link rel="stylesheet" href="{assets.asset('supplier.css')}"></head><body class="page">
+<main class="card supplier"><h1 class="brand"><span class="b1">quote</span><span class="b2">schmote</span></h1>
 <h2>{e(job.title)}</h2><p class="muted">{e(job.category)} &middot; {e(job.location_text)} &middot; ref {e(job.ref_prefix)}</p>
-{body}</main></body></html>"""
+{banner}{body}{actions}<p class="fine"><a href="/account">My requests</a></p></main></body></html>"""
         return HTMLResponse(page)
     finally:
         db.close()

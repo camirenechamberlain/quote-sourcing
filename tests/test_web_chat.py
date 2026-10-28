@@ -6,7 +6,7 @@ from fastapi.testclient import TestClient
 from PIL import Image
 
 import config
-from db.models import ChatSession, Company, IntakeSession, Job, User
+from db.models import ChatSession, Company, IntakeSession, Job, RfqSend, User
 from db.session import get_session
 from server import main, web_chat
 from server.agent import intake
@@ -386,7 +386,10 @@ def test_progress_page_shows_suppliers_but_never_their_emails_and_escapes_html(c
     try:
         job = db.query(Job).filter_by(public_token=pub).one()
         job.title = "<script>alert('x')</script>"
-        db.add(Company(job_id=job.id, place_id=f"p{next(counter)}", name="Mick's <b>Plumbing</b>", discovered_email="mick@secret-plumbing.example"))
+        mick = Company(job_id=job.id, place_id=f"p{next(counter)}", name="Mick's <b>Plumbing</b>", discovered_email="mick@secret-plumbing.example")
+        db.add(mick)
+        db.flush()
+        db.add(RfqSend(job_id=job.id, company_id=mick.id, reference_code="R", recipient_email=mick.discovered_email, subject="s", body="b", status="sent"))
         db.commit()
     finally:
         db.close()
@@ -395,7 +398,7 @@ def test_progress_page_shows_suppliers_but_never_their_emails_and_escapes_html(c
     html = page.text
     assert "secret-plumbing.example" not in html
     assert "<script>alert" not in html and "&lt;script&gt;" in html
-    assert "Queued" in html
+    assert "Request sent" in html and "Mick&#x27;s &lt;b&gt;Plumbing&lt;/b&gt;" in html  # contacted suppliers are listed, escaped
     assert page.headers["Referrer-Policy"] == "no-referrer"
 
 

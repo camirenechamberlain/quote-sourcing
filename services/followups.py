@@ -26,6 +26,7 @@ import config
 from db.models import Company, Job, Notification, Quote, ReplyEmail, RfqSend, User, Visit
 from db.session import get_session
 from services import outbound, timeutil
+from services.job_state import is_open
 from services.notify import already_sent, is_suppressed, send_notification
 from services.quote_format import describe_price, quote_kind, window_labels  # noqa: F401 (quote_kind re-exported for tests)
 
@@ -285,8 +286,14 @@ def plan(db, now: datetime.datetime | None = None) -> list[Planned]:
     """Everything that is due right now. Pure planning: nothing is sent or recorded."""
     ctx = Ctx(db, now or datetime.datetime.utcnow(), config.PUBLIC_BASE_URL, outbound.mode())
     out: list[Planned] = []
+    live: dict[str, bool] = {}
     for rule in RULES:
         for item in rule(ctx):
+            if item.job_id not in live:  # a request the customer has closed or awarded is finished: no more nudges of any kind
+                job = db.get(Job, item.job_id)
+                live[item.job_id] = job is None or is_open(job)
+            if not live[item.job_id]:
+                continue
             if item.audience == "supplier" and is_suppressed(db, item.to_email):
                 continue
             if item.needs_link and not ctx.base_url:

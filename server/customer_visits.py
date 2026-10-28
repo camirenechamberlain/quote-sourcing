@@ -15,6 +15,7 @@ from db.session import get_session
 from server.supplier_response import _not_found, _page
 from server.web_chat import SlidingWindow, client_ip, public_base
 from services import timeutil
+from services.job_state import is_open
 from services.notify import send_notification
 from services.visit_messages import (
     visit_cancelled_for_supplier,
@@ -58,7 +59,7 @@ def _selectable(quote: Quote) -> list[tuple[int, dict]]:
     return out
 
 
-def _gate(request: Request, public_token: str, quote_id: str, acting: bool = False):
+def _gate(request: Request, public_token: str, quote_id: str, acting: bool = False, allow_ended: bool = False):
     ip = client_ip(request)
     if not view_limiter.allow(ip) or (acting and not action_limiter.allow(ip)):
         return _page("Slow down", "<h2>Too many requests</h2><p class='muted'>Please wait a few minutes and try again.</p>", 429)
@@ -67,6 +68,10 @@ def _gate(request: Request, public_token: str, quote_id: str, acting: bool = Fal
     if loaded is None:
         db.close()
         return _not_found()
+    if not allow_ended and not is_open(loaded[0]):
+        db.close()
+        return _page("Request ended", f"<p><a class='back' href='/j/{public_token}'>&larr; Back to your request</a></p>"
+                     "<h2>This request has ended</h2><p class='muted'>It has been closed or awarded, so visit times can't be changed.</p>")
     return db, loaded
 
 
@@ -195,7 +200,7 @@ def cancel(request: Request, public_token: str, quote_id: str):
 
 @router.get("/j/{public_token}/visit/{quote_id}/visit.ics")
 def ics(request: Request, public_token: str, quote_id: str):
-    gate = _gate(request, public_token, quote_id)
+    gate = _gate(request, public_token, quote_id, allow_ended=True)
     if isinstance(gate, HTMLResponse):
         return gate
     db, (job, quote, rfq, company, customer) = gate

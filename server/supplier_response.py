@@ -20,6 +20,7 @@ from server import assets
 from server.web_chat import SlidingWindow, client_ip
 from services import attachments as attachments_service
 from services import timeutil
+from services.job_state import is_open
 from services.notify import suppress
 from services.quote_format import describe_price, window_labels
 from services.visit_messages import visit_invite
@@ -169,7 +170,26 @@ def _actions(token: str) -> str:
             f"<a class='btn quiet' href='/q/{token}/decline'>Can't help with this one</a>")
 
 
+def _ended_landing(db, token: str, rfq: RfqSend, job: Job, company: Company) -> HTMLResponse:
+    foot = f"<p class='fine'><a href='/q/{token}/optout'>Don't contact me about requests like this</a></p>"
+    if job.status == "AWARDED" and job.chosen_company_id == company.id:
+        customer = db.get(User, job.user_id) if job.user_id else None
+        who = e(customer.name) if customer and customer.name else "The customer"
+        price = f"<br>Agreed price: ${job.final_price:,.0f}" if job.final_price else ""
+        banner = (f"<div class='notice ok'><b>You've been chosen for this job.</b>{price}<br>{who}"
+                  + (f" &middot; <a href='tel:{e(customer.mobile)}'>{e(customer.mobile)}</a>" if customer and customer.mobile else "")
+                  + (f" &middot; {e(customer.email)}" if customer and customer.email else "")
+                  + f"<br>{e(job.location_text)}<br><span class='muted'>Please contact them to arrange the work.</span></div>")
+    elif job.status == "AWARDED":
+        banner = "<div class='notice'><b>The customer has chosen another supplier.</b> Thanks for responding.</div>"
+    else:
+        banner = "<div class='notice'><b>The customer has closed this request.</b> Thanks for your interest.</div>"
+    return _page("Request ended", f"{banner}{_brief(db, job, rfq)}{foot}")
+
+
 def _landing(db, token: str, rfq: RfqSend, job: Job, company: Company, saved: bool) -> HTMLResponse:
+    if not is_open(job):
+        return _ended_landing(db, token, rfq, job, company)
     existing = _existing(db, rfq)
     banner = ""
     if existing:
@@ -299,7 +319,12 @@ def _decline_form(token: str, values: dict, error: str = "") -> str:
 
 
 # --- Routes ---------------------------------------------------------------------------------------------
-def _gate(request: Request, token: str, submitting: bool = False):
+def _ended_page() -> HTMLResponse:
+    return _page("Request ended", "<h2>This request has ended</h2><p class='muted'>The customer has closed it or chosen a supplier, so "
+                 "we're no longer taking responses. Thanks for your time.</p>")
+
+
+def _gate(request: Request, token: str, submitting: bool = False, allow_closed: bool = False):
     """Rate-limit, then load the request. Returns (db, (rfq, job, company)) or an HTMLResponse to return."""
     ip = client_ip(request)
     if not view_limiter.allow(ip) or (submitting and (not submit_limiter_ip.allow(ip) or not submit_limiter_token.allow(token))):
@@ -309,6 +334,9 @@ def _gate(request: Request, token: str, submitting: bool = False):
     if loaded is None:
         db.close()
         return _not_found()
+    if submitting and not allow_closed and not is_open(loaded[1]):
+        db.close()
+        return _ended_page()
     return db, loaded
 
 
@@ -458,7 +486,7 @@ def optout_form(request: Request, token: str):
 
 @router.post("/q/{token}/optout", response_class=HTMLResponse)
 def optout_submit(request: Request, token: str):
-    gate = _gate(request, token, submitting=True)
+    gate = _gate(request, token, submitting=True, allow_closed=True)
     if isinstance(gate, HTMLResponse):
         return gate
     db, (rfq, job, company) = gate
