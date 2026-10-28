@@ -11,7 +11,7 @@ from fastapi.staticfiles import StaticFiles
 
 import config
 from db.session import get_session
-from server import assets, customer_visits, supplier_response, web_chat
+from server import account, assets, customer_visits, supplier_response, web_chat
 from services import followups, outbound
 
 log = logging.getLogger("server")
@@ -55,6 +55,7 @@ app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 app.include_router(web_chat.router)
 app.include_router(supplier_response.router)
 app.include_router(customer_visits.router)
+app.include_router(account.router)
 
 CSP = (
     "default-src 'self'; img-src 'self' blob:; style-src 'self'; script-src 'self'; connect-src 'self'; "

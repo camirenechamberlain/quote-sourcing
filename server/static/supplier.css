@@ -36,3 +36,9 @@
 .supplier input, .supplier textarea { box-sizing: border-box; max-width: 100%; }
 .supplier .slot input[type="date"] { min-width: 0; }
 .supplier .slot { grid-template-columns: minmax(0, 1fr); }
+
+/* account dashboard */
+.supplier input[type="email"] { width: 100%; padding: 12px; border: 1.5px solid var(--line); border-radius: 10px; font: inherit; background: var(--surface, #fff); color: var(--ink); }
+.supplier a.job { display: grid; gap: 4px; margin: 10px 0; padding: 12px 14px; border: 1.5px solid var(--line); border-radius: 12px; color: var(--ink); text-decoration: none; }
+.supplier a.job:active { background: var(--accent-soft); }
+.supplier a.job .chip { justify-self: start; margin-top: 4px; }

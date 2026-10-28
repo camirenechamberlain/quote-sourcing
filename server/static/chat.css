@@ -203,3 +203,5 @@ main { max-width: none; }
 
 .quick button.assist { border: 1.5px dashed var(--accent); color: var(--accent); background: var(--accent-soft); font-weight: 600; }
 .detail { margin-top: 4px; font-size: 0.85rem; color: var(--muted); }
+.topbar a.link-btn { text-decoration: underline; }
+.topbar a.link-btn + .link-btn { margin-left: 4px; }

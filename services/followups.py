@@ -27,7 +27,7 @@ from db.models import Company, Job, Notification, Quote, ReplyEmail, RfqSend, Us
 from db.session import get_session
 from services import outbound, timeutil
 from services.notify import already_sent, is_suppressed, send_notification
-from services.quote_format import describe_price, window_labels
+from services.quote_format import describe_price, quote_kind, window_labels  # noqa: F401 (quote_kind re-exported for tests)
 
 log = logging.getLogger("followups")
 
@@ -78,13 +78,6 @@ class Ctx:
 
 def in_business_hours(local: datetime.datetime) -> bool:
     return FIRST_HOUR <= local.hour < LAST_HOUR and local.weekday() != 6
-
-
-def quote_kind(q: Quote) -> str:
-    """quote | visit | decline | reply. Tolerates rows from before `kind` existed, and emailed replies that weren't actually quotes."""
-    if q.kind in ("visit", "decline"):
-        return q.kind
-    return "quote" if q.is_quote else "reply"
 
 
 def _link(ctx: Ctx, path: str) -> str:

@@ -55,6 +55,13 @@ class Job(Base):
     project_type: Mapped[str | None] = mapped_column(String, nullable=True)  # residential | commercial (shapes the supplier search)
     # Unguessable token for the customer-facing progress page (/j/<token>). Never the job id.
     public_token: Mapped[str | None] = mapped_column(String, unique=True, default=lambda: secrets.token_urlsafe(12))
+    # How the request ended (set by the customer from their progress page). status: DRAFT | QUEUED | ACTIVE | AWARDED | CLOSED
+    chosen_company_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    final_price: Mapped[float | None] = mapped_column(Float, nullable=True)
+    closed_reason: Mapped[str | None] = mapped_column(String, nullable=True)
+    closed_at: Mapped[datetime.datetime | None] = mapped_column(DateTime, nullable=True)
+    # When the customer approved the supplier shortlist (nothing is sent before this for customer-owned jobs)
+    shortlist_approved_at: Mapped[datetime.datetime | None] = mapped_column(DateTime, nullable=True)
 
     companies: Mapped[list["Company"]] = relationship(back_populates="job", cascade="all, delete-orphan")
 
@@ -76,6 +83,7 @@ class Company(Base):
     scrape_status: Mapped[str] = mapped_column(String, default="pending")
     scrape_notes: Mapped[str | None] = mapped_column(String, nullable=True)
     included: Mapped[bool] = mapped_column(Boolean, default=True)
+    customer_removed: Mapped[bool] = mapped_column(Boolean, default=False)  # the customer dropped this supplier from their shortlist
 
     job: Mapped["Job"] = relationship(back_populates="companies")
     rfq_sends: Mapped[list["RfqSend"]] = relationship(back_populates="company", cascade="all, delete-orphan")
@@ -266,4 +274,29 @@ class Suppression(Base):
 
     email: Mapped[str] = mapped_column(String, primary_key=True)  # lower-case
     reason: Mapped[str] = mapped_column(String, default="opted_out")
+    created_at: Mapped[datetime.datetime] = mapped_column(DateTime, default=_now)
+
+
+class AccountLoginToken(Base):
+    """A one-time sign-in link emailed to a customer. Only the hash is stored; it expires quickly and works once."""
+
+    __tablename__ = "account_login_tokens"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
+    token_hash: Mapped[str] = mapped_column(String, unique=True, nullable=False)
+    email: Mapped[str] = mapped_column(String, nullable=False, index=True)  # lower-case
+    expires_at: Mapped[datetime.datetime] = mapped_column(DateTime, nullable=False)
+    used_at: Mapped[datetime.datetime | None] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime.datetime] = mapped_column(DateTime, default=_now)
+
+
+class AccountSession(Base):
+    """A signed-in customer (a browser cookie). Only the hash of the cookie value is stored."""
+
+    __tablename__ = "account_sessions"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
+    token_hash: Mapped[str] = mapped_column(String, unique=True, nullable=False)
+    email: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    expires_at: Mapped[datetime.datetime] = mapped_column(DateTime, nullable=False)
     created_at: Mapped[datetime.datetime] = mapped_column(DateTime, default=_now)

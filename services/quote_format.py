@@ -22,3 +22,10 @@ def describe_price(price_type: str | None, amount: float | None, high: float | N
 def window_labels(windows) -> list[str]:
     """Readable labels for a quote's visit windows. Older rows stored plain strings; newer ones are {start, end, label}."""
     return [w.get("label", "") if isinstance(w, dict) else str(w) for w in windows or []]
+
+
+def quote_kind(q) -> str:
+    """quote | visit | decline | reply. Tolerates rows from before `kind` existed, and emailed replies that weren't actually quotes."""
+    if q.kind in ("visit", "decline"):
+        return q.kind
+    return "quote" if q.is_quote else "reply"
