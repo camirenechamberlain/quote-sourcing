@@ -42,3 +42,6 @@
 .supplier a.job { display: grid; gap: 4px; margin: 10px 0; padding: 12px 14px; border: 1.5px solid var(--line); border-radius: 12px; color: var(--ink); text-decoration: none; }
 .supplier a.job:active { background: var(--accent-soft); }
 .supplier a.job .chip { justify-self: start; margin-top: 4px; }
+.supplier .radio { align-items: flex-start; }
+.supplier .radio input { margin-top: 2px; flex: none; }
+.supplier .radio.consent { font-size: 0.95rem; line-height: 1.4; }

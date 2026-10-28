@@ -22,7 +22,7 @@ from db.session import get_session
 from server import assets
 from server.agent import intake
 from services import attachments as attachments_service
-from services.job_state import is_open, summarise
+from services.job_state import is_open, shortlist, summarise
 from services.quote_format import describe_price, money, window_labels
 from services import documents, images
 
@@ -446,7 +446,7 @@ LINK_TEXT = {"Wants a site visit": "Choose a time", "Visit booked": "Details and
 
 
 @router.get("/j/{public_token}", response_class=HTMLResponse)
-def progress_page(public_token: str, updated: int = 0):
+def progress_page(public_token: str, updated: int = 0, approved: int = 0, note: str = ""):
     db = get_session()
     try:
         job = db.query(Job).filter_by(public_token=public_token).first()
@@ -468,6 +468,10 @@ def progress_page(public_token: str, updated: int = 0):
             banner = f"<p><span class='chip'>{e(summary_state.label)}</span></p>"
         if updated:
             banner = "<div class='notice ok'>Added to your request. Any suppliers we've contacted have been emailed.</div>" + banner
+        if approved:
+            banner = "<div class='notice ok'>Thanks. We'll contact the suppliers you approved and update this page as they reply.</div>" + banner
+        if note:
+            banner = f"<p class='error' role='alert'>{e(note[:300])}</p>" + banner
 
         def cell(status, detail, link):
             out = f"<span class='chip'>{e(status)}</span>"
@@ -493,6 +497,26 @@ def progress_page(public_token: str, updated: int = 0):
         else:
             body = "<p>We're finding suppliers for you. This page refreshes automatically.</p>" if is_open(job) else ""
 
+        # Suppliers we found and have not yet contacted: the customer approves (or trims) the list before anything is sent.
+        pool = [c for c in shortlist(db, job) if c.included] if is_open(job) else []
+        panel = ""
+        if pool and job.shortlist_approved_at is None:
+            if not rows:
+                body = ""  # the shortlist replaces "we're finding suppliers"
+            items = "".join(
+                f"<label class='radio'><input type='checkbox' name='keep' value='{e(c.id)}' checked><span><b>{e(c.name)}</b>"
+                f"<br><span class='muted'>{('★ ' + format(c.rating, '.1f') + ' &middot; ') if c.rating else ''}{e((c.address or '').removesuffix(', Australia'))}</span></span></label>"
+                for c in pool
+            )
+            panel = (f"<h3>Suppliers we plan to contact</h3><p class='muted'>Untick anyone you don't want contacted. "
+                     f"Nothing is sent until you approve.</p><form method='post' action='/j/{e(public_token)}/shortlist'>"
+                     f"<div class='f'><div class='radios'>{items}</div></div><button class='btn primary' type='submit'>Approve and send</button></form>")
+        elif pool:
+            if not rows:
+                body = ""
+            names = "".join(f"<li>{e(c.name)}</li>" for c in pool)
+            panel = f"<h3>Approved</h3><p class='muted'>We're contacting these suppliers shortly.</p><ul class='facts'>{names}</ul>"
+
         actions = ""
         if is_open(job):
             actions = (f"<a class='btn' href='/j/{token}/update'>Add details or photos</a>"
@@ -503,7 +527,7 @@ def progress_page(public_token: str, updated: int = 0):
 <link rel="stylesheet" href="{assets.asset('chat.css')}"><link rel="stylesheet" href="{assets.asset('supplier.css')}"></head><body class="page">
 <main class="card supplier"><h1 class="brand"><span class="b1">quote</span><span class="b2">schmote</span></h1>
 <h2>{e(job.title)}</h2><p class="muted">{e(job.category)} &middot; {e(job.location_text)} &middot; ref {e(job.ref_prefix)}</p>
-{banner}{body}{actions}<p class="fine"><a href="/account">My requests</a></p></main></body></html>"""
+{banner}{body}{panel}{actions}<p class="fine"><a href="/account">My requests</a></p></main></body></html>"""
         return HTMLResponse(page)
     finally:
         db.close()

@@ -7,6 +7,7 @@ Rules (all emails go through services.notify, so OUTBOUND_MODE, supplier opt-out
   visit_reminder_*       both sides, within 24 hours before a confirmed visit
   post_visit_1 / _2      supplier visited but hasn't sent a quote: nudge 2 and 6 days after the visit
   quotes_waiting         customer has quotes and hasn't looked: one nudge after 3 days
+  shortlist_ready        customer is told once that suppliers were found and need their approval
 
 Only sends during local business hours (Mon to Sat), at most MAX_PER_RUN emails per run and DAILY_CAP per day. Each rule remembers what it
 has sent in the Notification table, so running it as often as you like never double-sends.
@@ -26,7 +27,7 @@ import config
 from db.models import Company, Job, Notification, Quote, ReplyEmail, RfqSend, User, Visit
 from db.session import get_session
 from services import outbound, timeutil
-from services.job_state import is_open
+from services.job_state import is_open, shortlist
 from services.notify import already_sent, is_suppressed, send_notification
 from services.quote_format import describe_price, quote_kind, window_labels  # noqa: F401 (quote_kind re-exported for tests)
 
@@ -278,7 +279,28 @@ def _quotes_waiting(ctx: Ctx):
                       needs_link=True)
 
 
-RULES = (_digest, _chases, _pick_reminders, _visits, _quotes_waiting)  # most useful to the customer first, so a daily cap trims the least important
+# ---- customer: your shortlist is ready ------------------------------------------------------------------------------
+def _shortlist_ready(ctx: Ctx):
+    """Tell the customer, once, that we've found suppliers and need their say-so before anyone is emailed."""
+    db = ctx.db
+    for job in db.query(Job).filter(Job.shortlist_approved_at.is_(None), Job.user_id.isnot(None)).all():
+        if not is_open(job):
+            continue
+        pool = [c for c in shortlist(db, job) if c.included]
+        if not pool or db.query(RfqSend).filter(RfqSend.job_id == job.id, RfqSend.status == "sent").count():
+            continue  # nothing to approve, or the operator already sent to suppliers
+        customer = _customer(db, job)
+        if not customer or not customer.email or already_sent(db, "shortlist_ready", job_id=job.id):
+            continue
+        link = _link(ctx, f"/j/{job.public_token}")
+        body = (f"Hi {customer.name or 'there'},\n\nWe've found {len(pool)} supplier{'s' if len(pool) != 1 else ''} for your {job.category} "
+                f"request (ref {job.ref_prefix}).\n\nReview the list and approve it here. You can remove anyone you don't want contacted, and "
+                f"nothing is sent until you approve:\n{link}\n\nQuoteschmote\n")
+        yield Planned("customer", "shortlist_ready", customer.email, f"Your supplier shortlist is ready [Ref: {job.ref_prefix}]", body, job.id,
+                      needs_link=True)
+
+
+RULES = (_shortlist_ready, _digest, _chases, _pick_reminders, _visits, _quotes_waiting)  # most useful to the customer first, so a daily cap trims the least important
 
 
 # ---- running -------------------------------------------------------------------------------------------------------

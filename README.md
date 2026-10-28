@@ -154,6 +154,25 @@ emails per run and 200 per day, and every email is recorded in the `Notification
   (the "Don't contact me" link on every supplier page and email). Customer emails that depend on a link are held back until `PUBLIC_BASE_URL`
   is set.
 
+### Customer accounts and managing a request
+
+Customers sign in at `/account` with an email link (no passwords): the link is single-use, lasts 15 minutes, and opening it only shows a
+Sign in button (so email scanners can't use it up). The page is always answered the same way, and the email is only sent to an address that
+has requests. "My requests" lists every request made with that email with a plain-English status.
+
+From a request's progress page (`/j/<token>`) the customer can:
+
+- **Approve the supplier shortlist.** Suppliers we found (with a usable email) are listed with their rating; the customer unticks anyone they
+  don't want and approves. Removed suppliers are never contacted. The admin's Review and Send page shows whether the customer has approved and
+  waits for it (the operator can override), and the Discover page won't let anyone re-include a removed supplier.
+- **Choose a supplier.** Records the agreed price, asks consent before sharing contact details, tells the winner (with details) and everyone
+  else (without), and cancels other visits.
+- **Close the request** (with an optional private reason), **add details or photos** (emailed to suppliers still in play; at most 5 updates).
+
+An ended request (closed or awarded) is finished everywhere: supplier pages say how it ended and refuse new responses (opting out always
+works), the visit picker refuses changes, and the automated follow-ups skip it. The customer is also emailed once when their shortlist is
+ready to review (`shortlist_ready` follow-up).
+
 ### Photos and PDF attachments
 
 Once the chat is under way, choosing photos sends them straight away (on the landing page they wait for the job description, and

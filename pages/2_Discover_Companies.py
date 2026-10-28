@@ -133,6 +133,7 @@ if companies:
             {
                 "id": c.id,
                 "Include": c.included,
+                "Removed by customer": c.customer_removed,
                 "Name": c.name,
                 "Address": c.address or "",
                 "Phone": c.phone or "",
@@ -154,7 +155,7 @@ if companies:
             "Include": st.column_config.CheckboxColumn(),
             "Email": st.column_config.TextColumn(help="Edit if scraping didn't find one"),
         },
-        disabled=["Name", "Address", "Phone", "Website", "Rating", "Email source", "Scrape status", "Notes"],
+        disabled=["Removed by customer", "Name", "Address", "Phone", "Website", "Rating", "Email source", "Scrape status", "Notes"],
         hide_index=True,
         use_container_width=True,
         key="candidate_editor",
@@ -166,7 +167,8 @@ if companies:
             c = by_id.get(row["id"])
             if c is None:
                 continue
-            c.included = bool(row["Include"])
+            if not c.customer_removed:  # a supplier the customer dropped stays dropped
+                c.included = bool(row["Include"])
             new_email = (row["Email"] or "").strip()
             if new_email and new_email != (c.discovered_email or ""):
                 c.discovered_email = new_email

@@ -28,7 +28,7 @@ from server.web_chat import (
 from services import attachments as attachments_service
 from services import documents, images
 from services.job_messages import awarded_to_supplier, closed_for_supplier, not_chosen_for_supplier, update_for_supplier
-from services.job_state import CLOSE_REASONS, is_open
+from services.job_state import CLOSE_REASONS, is_open, shortlist
 from services.notify import send_notification
 from services.quote_format import describe_price, quote_kind
 from services.visit_messages import visit_invite
@@ -290,5 +290,28 @@ def update(request: Request, public_token: str, note: str = Form(""), files: lis
             send_notification(db, audience="supplier", kind="job_update", to_email=rfq.recipient_email, subject=subject, body=body,
                               job_id=job.id, rfq_send_id=rfq.id, extra_files=blobs or None)
         return RedirectResponse(f"/j/{public_token}?updated=1", status_code=303)
+    finally:
+        db.close()
+
+
+# ---- approve the supplier shortlist ------------------------------------------------------------------------------------
+@router.post("/j/{public_token}/shortlist", response_class=HTMLResponse)
+def approve_shortlist(request: Request, public_token: str, keep: list[str] = Form(default=[])):
+    """The customer approves the suppliers we found. Anyone they leave unticked is removed and will never be contacted."""
+    gate = _gate(request, public_token, acting=True)
+    if isinstance(gate, HTMLResponse):
+        return gate
+    db, job = gate
+    try:
+        pool = shortlist(db, job)  # only suppliers still waiting to be contacted can be changed
+        keep_ids = set(keep)
+        if not any(c.id in keep_ids for c in pool):
+            return RedirectResponse(f"/j/{public_token}?note=" + quote_plus("Choose at least one supplier, or close the request."), status_code=303)
+        for company in pool:
+            company.included = company.id in keep_ids
+            company.customer_removed = company.id not in keep_ids
+        job.shortlist_approved_at = datetime.datetime.utcnow()
+        db.commit()
+        return RedirectResponse(f"/j/{public_token}?approved=1", status_code=303)
     finally:
         db.close()

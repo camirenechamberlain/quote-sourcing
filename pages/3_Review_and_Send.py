@@ -13,6 +13,7 @@ from db.models import AppSetting, Company, Job, RfqSend, User
 from db.session import get_session
 from services import attachments as attachments_service
 from services import outbound
+from services.job_state import is_open
 from services.notify import is_suppressed
 from services.gmail_service import GmailNotConnected
 from services.rfq_template import build_rfq
@@ -60,6 +61,18 @@ else:
 if not config.PUBLIC_BASE_URL:
     st.warning("`PUBLIC_BASE_URL` isn't set in `.env` (for example `https://quoteschmote.com`), so these emails will NOT include the "
                "one-tap response link for suppliers. They can still reply by email.")
+
+# A customer's request is only sent once they have approved the supplier shortlist (and never once they have ended it).
+approval_ok = True
+if job.user_id:
+    if not is_open(job):
+        st.error(f"The customer has {'chosen a supplier for' if job.status == 'AWARDED' else 'closed'} this request, so nothing more should be sent.")
+        approval_ok = False
+    elif job.shortlist_approved_at is None:
+        st.warning("The customer hasn't approved the supplier shortlist yet. They're emailed a link to review it once suppliers are found.")
+        approval_ok = st.checkbox("Send anyway, without waiting for the customer's approval", key="skip_approval")
+    else:
+        st.success(f"The customer approved the shortlist on {job.shortlist_approved_at:%d %b %Y}. Suppliers they removed are not listed below.")
 
 with st.expander(f"📎 Attachments ({len(job.attachment_paths or [])}) — sent with every RFQ for this job", expanded=True):
     current = job.attachment_paths or []
@@ -169,7 +182,7 @@ st.markdown(f"### {len(to_send)} email(s) selected")
 acknowledged = True
 if mode == "live":
     acknowledged = st.checkbox("I understand these will be emailed to real businesses", key="live_ack")
-blocked = (mode == "test" and not outbound.test_recipient()) or not acknowledged
+blocked = (mode == "test" and not outbound.test_recipient()) or not acknowledged or not approval_ok
 button_label = {
     "dry_run": f"Preview {len(to_send)} email(s) (nothing is sent)",
     "test": f"Send {len(to_send)} TEST email(s) to {outbound.test_recipient() or '(set TEST_RECIPIENT)'}",
@@ -213,6 +226,8 @@ if st.button(button_label, type="primary", disabled=not to_send or blocked):
             rfq_send.status = "sent"
             rfq_send.test_mode = delivery.test_mode
             rfq_send.sent_at = datetime.datetime.utcnow()
+            if job.status == "QUEUED":
+                job.status = "ACTIVE"  # suppliers have now been contacted
             results.append((company.name, f"sent to {delivery.sent_to} (test)" if delivery.test_mode else "sent"))
         except (GmailNotConnected, outbound.OutboundError) as e:
             rfq_send.status = "failed"
