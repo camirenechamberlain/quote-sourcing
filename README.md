@@ -173,6 +173,13 @@ An ended request (closed or awarded) is finished everywhere: supplier pages say 
 works), the visit picker refuses changes, and the automated follow-ups skip it. The customer is also emailed once when their shortlist is
 ready to review (`shortlist_ready` follow-up).
 
+### Email buttons
+
+Emails go out as plain text plus an HTML version (`services/email_html.py`, switch off with `EMAIL_HTML=0`). Where a supplier's response link
+appears, the HTML version shows three buttons that go straight to the right form (quote, see the job first, can't help). The plain-text
+version, which is what you review and edit in the admin app, is always included. Buttons are links on purpose: one click can't record an answer,
+because the link scanners many mail systems run would trigger it. Each button opens a form or a confirmation page.
+
 ### Photos and PDF attachments
 
 Once the chat is under way, choosing photos sends them straight away (on the landing page they wait for the job description, and
