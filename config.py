@@ -53,6 +53,10 @@ GLOBAL_DAILY_MESSAGES = int(env("GLOBAL_DAILY_MESSAGES", "1500"))
 OUTBOUND_MODE = env("OUTBOUND_MODE", "dry_run")  # dry_run | test | live (anything else is treated as dry_run)
 # In test mode every RFQ is redirected to this address (your own inbox) instead of the supplier.
 TEST_RECIPIENT = env("TEST_RECIPIENT", "")
+# Introduction fee, in dollars, charged to a supplier once per request when the customer confirms a site visit with them (or chooses them).
+# 0 = free beta. While it is 0, suppliers are shown INTRODUCTION_FEE_LIST as "normally $X", and the ledger records it as the would-be revenue.
+INTRODUCTION_FEE = float(env("INTRODUCTION_FEE", "0"))
+INTRODUCTION_FEE_LIST = float(env("INTRODUCTION_FEE_LIST", "30"))
 # Automated follow-ups (supplier chases, visit reminders, customer updates). Off by default: turn on once sending is set up.
 # They still obey OUTBOUND_MODE, so in dry_run they are only logged.
 FOLLOWUPS_ENABLED = env("FOLLOWUPS_ENABLED", "0") == "1"

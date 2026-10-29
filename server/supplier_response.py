@@ -23,6 +23,7 @@ from services import timeutil
 from services.location import public_location
 from services.job_state import is_open
 from services.notify import suppress
+from services.supplier_terms import TERMS_SECTIONS, TERMS_VERSION, fee_text
 from services.quote_format import describe_price, window_labels
 from services.visit_messages import visit_invite
 
@@ -85,7 +86,7 @@ def _existing(db, rfq: RfqSend) -> Quote | None:
 def save_response(db, rfq: RfqSend, job: Job, company: Company, *, kind: str, price_type: str = "unknown",
                   price: float | None = None, price_max: float | None = None, included: str = "", excluded: str = "",
                   timeline: str = "", warranty: str = "", notes: str = "", visit_windows: list[dict] | None = None,
-                  decline_reason: str | None = None) -> Quote:
+                  decline_reason: str | None = None, fee_accepted: bool = False) -> Quote:
     """Store (or replace) the supplier's web response as a ReplyEmail + Quote, so the rest of the app treats it like an email reply."""
     visit_windows = visit_windows or []
     price_text = describe_price(price_type, price, price_max)
@@ -128,6 +129,9 @@ def save_response(db, rfq: RfqSend, job: Job, company: Company, *, kind: str, pr
     quote.decline_reason = decline_reason if kind == "decline" else None
     quote.visit_windows = visit_windows if kind == "visit" else []
     quote.windows_declined = False  # a fresh response clears any earlier "those times don't suit"
+    if kind == "visit" and fee_accepted:  # recorded when they tick the box, so we can show what they agreed to
+        quote.fee_accepted_at = datetime.datetime.utcnow()
+        quote.fee_terms_version = TERMS_VERSION
     quote.llm_raw_response = None
     db.commit()
     return quote
@@ -267,6 +271,9 @@ def _visit_form(token: str, values: dict, error: str = "") -> str:
         + "".join(_slot_row(i, values, today) for i in (1, 2, 3))
         + _field("Ballpark price, if you can (optional, $)", "price", values.get("price", ""), placeholder="e.g. 4,000 to 6,000")
         + _field("Anything the customer should prepare (optional)", "notes", values.get("notes", ""), textarea=True)
+        + f"<div class='notice'><b>Introduction fee</b><br>{e(fee_text())}</div>"
+        + "<label class='radio consent'><input type='checkbox' name='agree' value='1'" + (" checked" if values.get("agree") == "1" else "") + ">"
+        "<span>I agree to the <a href='/supplier-terms' target='_blank' rel='noopener'>introduction fee terms</a>.</span></label>"
         + "<button class='btn primary' type='submit'>Offer these times</button></form>"
     )
 
@@ -409,19 +416,21 @@ def visit_form(request: Request, token: str):
 @router.post("/q/{token}/visit", response_class=HTMLResponse)
 def visit_submit(request: Request, token: str, date1: str = Form(""), from1: str = Form(""), to1: str = Form(""),
                  date2: str = Form(""), from2: str = Form(""), to2: str = Form(""), date3: str = Form(""), from3: str = Form(""),
-                 to3: str = Form(""), price: str = Form(""), notes: str = Form("")):
+                 to3: str = Form(""), price: str = Form(""), notes: str = Form(""), agree: str = Form("")):
     gate = _gate(request, token, submitting=True)
     if isinstance(gate, HTMLResponse):
         return gate
     db, (rfq, job, company) = gate
     try:
         values = {"date1": date1, "from1": from1, "to1": to1, "date2": date2, "from2": from2, "to2": to2, "date3": date3,
-                  "from3": from3, "to3": to3, "price": price, "notes": notes}
+                  "from3": from3, "to3": to3, "price": price, "notes": notes, "agree": agree}
         windows, error = parse_slots(values)
         if error:
             return _page("Arrange a site visit", _visit_form(token, values, error), 400)
+        if agree != "1":
+            return _page("Arrange a site visit", _visit_form(token, values, "Please tick the box to agree to the introduction fee terms."), 400)
         ballpark = clean_text(price, 60)
-        save_response(db, rfq, job, company, kind="visit", visit_windows=windows,
+        save_response(db, rfq, job, company, kind="visit", visit_windows=windows, fee_accepted=True,
                       notes=(f"Ballpark: {ballpark}. " if ballpark else "") + clean_text(notes))
         return RedirectResponse(f"/q/{token}?saved=1", status_code=303)
     finally:
@@ -498,3 +507,12 @@ def optout_submit(request: Request, token: str):
                      "Sorry for the interruption, and thanks for letting us know.</p>")
     finally:
         db.close()
+
+
+@router.get("/supplier-terms", response_class=HTMLResponse)
+def supplier_terms(request: Request):
+    """The terms suppliers agree to when they offer visit times (draft: have it reviewed before charging)."""
+    if not view_limiter.allow(client_ip(request)):
+        return _page("Slow down", "<h2>Too many requests</h2>", 429)
+    sections = "".join(f"<h3>{e(title)}</h3><p>{e(body() if callable(body) else body)}</p>" for title, body in TERMS_SECTIONS)
+    return _page("Supplier terms", f"<h2>Supplier terms</h2><p class='muted'>Version {e(TERMS_VERSION)} (draft)</p>{sections}")

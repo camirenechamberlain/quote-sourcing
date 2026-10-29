@@ -176,7 +176,7 @@ def day(days_ahead: int = 7) -> str:
 
 def visit_data(**over):
     base = {"date1": day(7), "from1": "10:00", "to1": "12:00", "date2": day(8), "from2": "14:00", "to2": "16:30",
-            "date3": "", "from3": "", "to3": "", "price": "4k to 6k", "notes": "Clear the car park"}
+            "date3": "", "from3": "", "to3": "", "price": "4k to 6k", "notes": "Clear the car park", "agree": "1"}
     return {**base, **over}
 
 

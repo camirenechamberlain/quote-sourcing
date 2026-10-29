@@ -4,6 +4,7 @@ from __future__ import annotations
 from services import timeutil
 from services.ics import build_ics
 from services.location import public_location
+from services.supplier_terms import fee_status_line
 
 
 def visit_invite(visit, job, company, *, for_supplier: bool, customer_first_name: str | None = None, cancelled: bool = False) -> tuple[str, str, bytes]:
@@ -33,6 +34,7 @@ def visit_confirmed_for_supplier(job, company, customer, visit, supplier_url: st
   Email:  {customer.email if customer and customer.email else "not provided"}
 
 A calendar invite is attached. Once you've seen the job, please send your quote through the same link so it reaches the customer straight away.
+{fee_status_line()}
 {link}
 Thanks,
 Quoteschmote, on behalf of {name}

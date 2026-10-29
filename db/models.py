@@ -157,6 +157,9 @@ class Quote(Base):
     visit_windows: Mapped[list] = mapped_column(JSON, default=list)
     windows_declined: Mapped[bool] = mapped_column(Boolean, default=False)  # the customer can't do any of the offered times
     notified_customer_at: Mapped[datetime.datetime | None] = mapped_column(DateTime, nullable=True)  # when we last told the customer
+    # The supplier ticked "I agree to the introduction fee terms" when offering visit times
+    fee_accepted_at: Mapped[datetime.datetime | None] = mapped_column(DateTime, nullable=True)
+    fee_terms_version: Mapped[str | None] = mapped_column(String, nullable=True)
     extracted_at: Mapped[datetime.datetime] = mapped_column(DateTime, default=_now)
 
     reply_email: Mapped["ReplyEmail"] = relationship(back_populates="quote")
@@ -299,4 +302,25 @@ class AccountSession(Base):
     token_hash: Mapped[str] = mapped_column(String, unique=True, nullable=False)
     email: Mapped[str] = mapped_column(String, nullable=False, index=True)
     expires_at: Mapped[datetime.datetime] = mapped_column(DateTime, nullable=False)
+    created_at: Mapped[datetime.datetime] = mapped_column(DateTime, default=_now)
+
+
+class Introduction(Base):
+    """The moment a supplier is given a customer's details (a confirmed site visit, or being chosen). One per supplier per request, so
+    rebooking never charges twice. `fee_cents` is what is actually charged (0 during the beta); `list_fee_cents` is what the fee would have
+    been, so the ledger shows the revenue we would have earned. status: due | invoiced | paid | free_beta | waived | void."""
+
+    __tablename__ = "introductions"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
+    job_id: Mapped[str] = mapped_column(ForeignKey("jobs.id"), nullable=False, index=True)
+    rfq_send_id: Mapped[str] = mapped_column(ForeignKey("rfq_sends.id"), nullable=False, unique=True)
+    company_id: Mapped[str] = mapped_column(ForeignKey("companies.id"), nullable=False)
+    trigger: Mapped[str] = mapped_column(String, default="visit_booked")  # visit_booked | awarded
+    fee_cents: Mapped[int] = mapped_column(Integer, default=0)
+    list_fee_cents: Mapped[int] = mapped_column(Integer, default=0)
+    status: Mapped[str] = mapped_column(String, default="free_beta")
+    terms_version: Mapped[str | None] = mapped_column(String, nullable=True)
+    accepted_at: Mapped[datetime.datetime | None] = mapped_column(DateTime, nullable=True)
+    note: Mapped[str | None] = mapped_column(String, nullable=True)
     created_at: Mapped[datetime.datetime] = mapped_column(DateTime, default=_now)

@@ -26,7 +26,7 @@ from server.web_chat import (
     public_base,
 )
 from services import attachments as attachments_service
-from services import documents, images
+from services import documents, images, introductions
 from services.job_messages import awarded_to_supplier, closed_for_supplier, not_chosen_for_supplier, update_for_supplier
 from services.job_state import CLOSE_REASONS, is_open, shortlist
 from services.notify import send_notification
@@ -88,6 +88,7 @@ def _supplier_link(request: Request, rfq: RfqSend) -> str | None:
 def _cancel_visits(db, request, job, customer, rfq, company) -> None:
     for visit in db.query(Visit).filter_by(rfq_send_id=rfq.id, status="confirmed").all():
         visit.status = "cancelled"
+    introductions.void_for_rfq(db, rfq.id, "The request ended before the visit")
     db.commit()
 
 
@@ -204,6 +205,7 @@ def choose(request: Request, public_token: str, quote_id: str, price: str = Form
             other.is_winner = other.id == quote.id
         job.status, job.chosen_company_id, job.final_price = "AWARDED", company.id, agreed
         job.closed_at = datetime.datetime.utcnow()
+        introductions.ensure(db, job, rfq, company, quote, "awarded")  # the chosen supplier is about to receive the customer's details
         db.commit()
         _end_job(db, request, job, chosen=company, price=agreed)
         return RedirectResponse(f"/j/{public_token}", status_code=303)

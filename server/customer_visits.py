@@ -15,6 +15,7 @@ from db.session import get_session
 from server.supplier_response import _not_found, _page
 from server.web_chat import SlidingWindow, client_ip, public_base
 from services import timeutil
+from services import introductions
 from services.job_state import is_open
 from services.notify import send_notification
 from services.visit_messages import (
@@ -143,6 +144,7 @@ def confirm(request: Request, public_token: str, quote_id: str, slot: str = Form
                       end_local=window["end"], label=window["label"], status="confirmed")
         db.add(visit)
         quote.windows_declined = False
+        introductions.ensure(db, job, rfq, company, quote, "visit_booked")  # the supplier is about to receive the customer's details
         db.commit()
 
         subject, body = visit_confirmed_for_supplier(job, company, customer, visit, _supplier_link(request, rfq))
@@ -187,6 +189,7 @@ def cancel(request: Request, public_token: str, quote_id: str):
         if visit:
             visit.status = "cancelled"
             quote.windows_declined = True  # the supplier is asked for new times
+            introductions.void_for_rfq(db, rfq.id, "The customer cancelled the visit")
             db.commit()
             subject, body = visit_cancelled_for_supplier(job, company, visit, _supplier_link(request, rfq))
             send_notification(db, audience="supplier", kind="visit_cancelled", to_email=rfq.recipient_email, subject=subject, body=body,
