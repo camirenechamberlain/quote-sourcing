@@ -173,6 +173,27 @@ An ended request (closed or awarded) is finished everywhere: supplier pages say 
 works), the visit picker refuses changes, and the automated follow-ups skip it. The customer is also emailed once when their shortlist is
 ready to review (`shortlist_ready` follow-up).
 
+### What suppliers see, and the introduction fee
+
+Until a visit is booked, suppliers see the job, the photos and the **suburb only** (`services/location.py` reduces an address to its suburb,
+deterministically). The exact address, the customer's name, mobile and email are released together when the customer confirms a visit or chooses
+the supplier. That moment is the **introduction**, and it is where a fee attaches:
+
+- When a supplier offers visit times they must tick "I agree to the introduction fee terms" (`/supplier-terms`, a **draft**: have it reviewed
+  before charging). The form says the fee is free during the beta and what it normally is. Quoting and responding are always free.
+- One `Introduction` is recorded per supplier per request (a confirmed visit, or being chosen without one). Cancelling the visit or ending the
+  request voids it (we waive the fee); booking again reinstates the same record; invoiced or paid ones are never voided automatically.
+  A supplier who hadn't accepted the terms (an offer made before fees existed) is recorded as `waived`.
+- `INTRODUCTION_FEE` (default `0`, free beta) is the dollars actually charged; `INTRODUCTION_FEE_LIST` (default `30`) is shown as "normally $X" and
+  recorded as the would-be revenue. The admin **Introductions and fees** page shows the totals and lets you mark each as invoiced, paid or
+  waived. Invoicing is manual for now; there is no payments code.
+
+### Funnel
+
+The admin **Funnel** page (`services/funnel.py`) shows where requests drop off: requests made, suppliers found, shortlist approved, suppliers
+contacted, responses, quotes, visits booked, awarded; plus supplier response rate, quotes per job, award rate, median time to first reply, average
+agreed price and why suppliers declined. Test-mode sends are excluded unless you tick the box.
+
 ### Photos and PDF attachments
 
 Once the chat is under way, choosing photos sends them straight away (on the landing page they wait for the job description, and
