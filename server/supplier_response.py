@@ -20,6 +20,7 @@ from server import assets
 from server.web_chat import SlidingWindow, client_ip
 from services import attachments as attachments_service
 from services import timeutil
+from services.location import public_location
 from services.job_state import is_open
 from services.notify import suppress
 from services.quote_format import describe_price, window_labels
@@ -150,7 +151,7 @@ def _not_found() -> HTMLResponse:
 def _brief(db, job: Job, rfq: RfqSend) -> str:
     customer = db.get(User, job.user_id) if job.user_id else None
     on_behalf = f" on behalf of {e(customer.name)}" if customer and customer.name else ""
-    facts = [f"<li><b>Where:</b> {e(job.location_text)}</li>"]
+    facts = [f"<li><b>Where:</b> {e(public_location(job))}<br><span class='muted'>The exact address and the customer's phone are shared when they confirm a visit.</span></li>"]
     if job.project_type:
         facts.append(f"<li><b>Type:</b> {e(job.project_type)}</li>")
     if job.timeframe:

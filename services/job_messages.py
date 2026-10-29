@@ -2,6 +2,7 @@
 Pure text builders: nothing here sends or touches the database."""
 from __future__ import annotations
 
+from services.location import public_location
 from services.quote_format import money
 
 
@@ -12,7 +13,7 @@ def _sign(customer) -> str:
 def closed_for_supplier(job, company, customer) -> tuple[str, str]:
     body = f"""Hi {company.name} team,
 
-A quick note: the customer has closed their {job.category} request for {job.location_text} (ref {job.ref_prefix}). Nothing more is needed from you, and any booked site visit has been cancelled.
+A quick note: the customer has closed their {job.category} request for {public_location(job)} (ref {job.ref_prefix}). Nothing more is needed from you, and any booked site visit has been cancelled.
 
 Thanks for your time.
 {_sign(customer)}
@@ -44,7 +45,7 @@ Thanks,
 def not_chosen_for_supplier(job, company, customer) -> tuple[str, str]:
     body = f"""Hi {company.name} team,
 
-Thanks for taking the time to respond to the {job.category} request for {job.location_text} (ref {job.ref_prefix}). The customer has decided to go with another supplier this time. Any booked site visit has been cancelled.
+Thanks for taking the time to respond to the {job.category} request for {public_location(job)} (ref {job.ref_prefix}). The customer has decided to go with another supplier this time. Any booked site visit has been cancelled.
 
 We appreciate it, and hope to send more work your way.
 {_sign(customer)}
@@ -58,7 +59,7 @@ def update_for_supplier(job, company, customer, note: str, new_files: list[str],
     said = f"\n{note}\n" if note else ""
     body = f"""Hi {company.name} team,
 
-The customer has added some details to their {job.category} request for {job.location_text} (ref {job.ref_prefix}):
+The customer has added some details to their {job.category} request for {public_location(job)} (ref {job.ref_prefix}):
 {said}{files}{link}
 Thanks,
 {_sign(customer)}

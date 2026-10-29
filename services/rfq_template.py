@@ -3,6 +3,7 @@ from __future__ import annotations
 import uuid
 
 from db.models import Company, Job
+from services.location import public_location
 
 
 def make_reference_code(job: Job) -> str:
@@ -33,7 +34,7 @@ def build_body(job: Job, company: Company, reference_code: str, sender_name: str
     optout_line = f"\nNot interested in requests like this? Stop them here: {response_url}/optout\n" if response_url else ""
     return f"""Hi {company.name} team,
 
-I'm writing on behalf of {sender_name} to request a quote for the following job in {job.location_text}:
+I'm writing on behalf of {sender_name} to request a quote for the following job in {public_location(job)}:
 
 {job.description}
 

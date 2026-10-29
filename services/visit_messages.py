@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from services import timeutil
 from services.ics import build_ics
+from services.location import public_location
 
 
 def visit_invite(visit, job, company, *, for_supplier: bool, customer_first_name: str | None = None, cancelled: bool = False) -> tuple[str, str, bytes]:
@@ -60,7 +61,7 @@ def windows_declined_for_supplier(job, company, supplier_url: str | None) -> tup
     link = f"\nOffer new times here (about a minute): {supplier_url}\n" if supplier_url else ""
     body = f"""Hi {company.name} team,
 
-The customer can't make any of the times you offered for the {job.category} job at {job.location_text} (ref {job.ref_prefix}).
+The customer can't make any of the times you offered for the {job.category} job at {public_location(job)} (ref {job.ref_prefix}).
 Could you offer a couple of other times?
 {link}
 Thanks,
@@ -73,7 +74,7 @@ def visit_cancelled_for_supplier(job, company, visit, supplier_url: str | None) 
     link = f"\nOffer new times here: {supplier_url}\n" if supplier_url else ""
     body = f"""Hi {company.name} team,
 
-The customer needs to cancel the site visit on {visit.label} for the {job.category} job at {job.location_text} (ref {job.ref_prefix}).
+The customer needs to cancel the site visit on {visit.label} for the {job.category} job at {public_location(job)} (ref {job.ref_prefix}).
 The calendar entry is cancelled. If you're still keen, please offer new times.
 {link}
 Thanks,

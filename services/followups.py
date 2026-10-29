@@ -27,6 +27,7 @@ import config
 from db.models import Company, Job, Notification, Quote, ReplyEmail, RfqSend, User, Visit
 from db.session import get_session
 from services import outbound, timeutil
+from services.location import public_location
 from services.job_state import is_open, shortlist
 from services.notify import already_sent, is_suppressed, send_notification
 from services.quote_format import describe_price, quote_kind, window_labels  # noqa: F401 (quote_kind re-exported for tests)
@@ -133,7 +134,7 @@ def _chases(ctx: Ctx):
         who = customer.name if customer and customer.name else "the customer"
         opt_out = f"\nNot interested in requests like this? {url}/optout\n" if url else ""
         body = (f"Hi {company.name} team,\n\n{opener}: {who} is still looking for a quote for the {job.category} job in "
-                f"{job.location_text} (ref {job.ref_prefix}).\n\n{how}\nThanks,\n{_sign(customer)}\n{opt_out}")
+                f"{public_location(job)} (ref {job.ref_prefix}).\n\n{how}\nThanks,\n{_sign(customer)}\n{opt_out}")
         yield Planned("supplier", kind, rfq.recipient_email, f"Following up: {rfq.subject}"[:200], body, job.id, rfq.id)
 
 
